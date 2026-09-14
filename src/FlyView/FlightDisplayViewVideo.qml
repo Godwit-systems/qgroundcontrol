@@ -95,6 +95,16 @@ Item {
                 anchors.centerIn:   parent
             }
 
+            Button {
+                text: "Click Me"
+                z: 1000
+                onClicked: {
+                    console.log("Button pressed!")
+                   
+                    
+                    globals.activeVehicle.sendTargetRelative(41)
+                }
+            }
         
         
 
@@ -223,8 +233,7 @@ Item {
                         height: 100
                         Layout.fillHeight: true
                         Layout.fillWidth: true
-                        implicitWidth: element.implicitWidth
-                        implicitHeight: element.implicitHeight
+                      
 
                         anchors.left: videoContentArea.left
                         anchors.bottom: videoContentArea.bottom

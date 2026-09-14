@@ -314,6 +314,7 @@ void MockLink::run1HzTasks()
     _sendVibration();
     _sendBatteryStatus();
     _sendNamedValueFloats();
+   
     _sendSysStatus();
     _sendADSBVehicles();
     if (_vehicleType != MAV_TYPE_SUBMARINE) {
@@ -860,6 +861,7 @@ void MockLink::_sendBatteryStatus()
     respondWithMavlinkMessage(msg);
 }
 
+
 void MockLink::_sendNamedValueFloats()
 {
     const uint32_t timeBootMs = static_cast<uint32_t>(_runningTime.elapsed());
@@ -871,7 +873,13 @@ void MockLink::_sendNamedValueFloats()
     // NAMED_VALUE_FLOAT.name is a fixed 10-byte field; pack_chan memcpys 10 bytes unconditionally.
     static constexpr char kSinName[10] = "sin_wave";
     static constexpr char kCosName[10] = "cos_wave";
-
+    
+    float testValues = 43.0f;
+   
+    // NAMED_VALUE_FLOAT.name is a fixed 10-byte field; pack_chan memcpys 10 bytes unconditionally.
+    static constexpr char TargetCoords[20] = "target_cords";
+  
+    
     mavlink_message_t msg{};
     (void) mavlink_msg_named_value_float_pack_chan(
         _vehicleSystemId,
@@ -894,6 +902,19 @@ void MockLink::_sendNamedValueFloats()
         cosVal
     );
     respondWithMavlinkMessage(msg);
+
+    (void) mavlink_msg_named_value_float_pack_chan(
+        _vehicleSystemId,
+        _vehicleComponentId,
+        _outgoingMavlinkChannel,
+        &msg,
+        timeBootMs,
+        TargetCoords,
+        testValues
+    );
+    respondWithMavlinkMessage(msg);
+
+
 }
 
 void MockLink::_sendVibration()
