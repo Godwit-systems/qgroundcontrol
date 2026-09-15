@@ -203,6 +203,7 @@ if(WIN32 AND NOT TARGET Vulkan::Headers)
     find_package(Vulkan QUIET COMPONENTS Headers)
     if(NOT Vulkan_FOUND)
         CPMAddPackage(
+            libs/mavlink-def
             NAME VulkanHeaders
             GITHUB_REPOSITORY KhronosGroup/Vulkan-Headers
             GIT_TAG vulkan-sdk-1.4.341.0

@@ -3166,7 +3166,8 @@ void MockLink::_sendAvailableMode(uint8_t modeIndexOneBased)
         availableMode.standard_mode,
         availableMode.custom_mode,
         availableMode.canBeSet ? 0 : MAV_MODE_PROPERTY_NOT_USER_SELECTABLE,
-        modeName);
+        modeName,
+        0);
     respondWithMavlinkMessage(msg);
 }
 

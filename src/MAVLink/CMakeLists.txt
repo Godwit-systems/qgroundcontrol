@@ -38,7 +38,7 @@ CPMAddPackage(
         "MAVLINK_DIALECT ${QGC_MAVLINK_DIALECT}"
         "MAVLINK_VERSION ${QGC_MAVLINK_VERSION}"
     # Retry upstream's build-time pip install and make mavgen hashes deterministic.
-    PATCHES mavlink-deterministic-mavgen.patch
+    # PATCHES mavlink-deterministic-mavgen.patch
 )
 
 qgc_require_cpm_added(mavlink)
