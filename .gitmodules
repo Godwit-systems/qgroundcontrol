@@ -1,0 +1,3 @@
+[submodule "libs/mavlink-xml"]
+	path = libs/mavlink-xml
+	url = https://github.com/juleskj/mavlink.git

@@ -114,15 +114,6 @@ option(QGC_NO_SERIAL_LINK "Disable serial port communication" OFF)
 option(QGC_ENABLE_GST_VIDEOSTREAMING "Enable GStreamer video backend" ON)
 
 # ============================================================================
-# MAVLink Configuration
-# ============================================================================
-
-set(QGC_MAVLINK_GIT_REPO "https://github.com/mavlink/mavlink.git" CACHE STRING "MAVLink repository URL")
-set(QGC_MAVLINK_GIT_TAG "c409cf690454db6d3e004bd14173bc6c7ff1e0ff" CACHE STRING "MAVLink repository commit/tag")
-set(QGC_MAVLINK_DIALECT "all" CACHE STRING "MAVLink dialect")
-set(QGC_MAVLINK_VERSION "2.0" CACHE STRING "MAVLink protocol version")
-
-# ============================================================================
 # Autopilot Plugin Configuration
 # ============================================================================
 
