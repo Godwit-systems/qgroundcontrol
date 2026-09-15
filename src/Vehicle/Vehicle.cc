@@ -3595,10 +3595,16 @@ void Vehicle::sendTargetRelative(double testValues)
     }
     
     // mavlink_msg_send_target_coords_chan(
-    
+    mavlink_msg_named_value_float_pack_chan(
+        id(),
+        MAV_COMP_ID_MISSIONPLANNER,
+        link->mavlinkChannel(),
+        &msg,
+        static_cast<uint32_t>(QDateTime::currentMSecsSinceEpoch()),
+        "target cords",
+        testValues
+    );
 
-
-    
     sendMessageOnLinkThreadSafe(link.get(), msg);
     qDebug() << "SEND NAMED_VALUE_FLOAT TEST MESSAGE" << testValues;
 
