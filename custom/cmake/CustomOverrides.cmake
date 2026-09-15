@@ -49,7 +49,7 @@ set(QGC_DISABLE_PX4_PLUGIN_FACTORY ON CACHE BOOL "Disable PX4 Plugin Factory" FO
 # MAVLink Configuration
 # ----------------------------------------------------------------------------
 set(QGC_MAVLINK_GIT_REPO "https://github.com/juleskj/mavlink.git" CACHE STRING "MAVLink repository URL" FORCE)
-set(QGC_MAVLINK_GIT_TAG "8e3699bb62a81c71986b48b5b78180f40c57afc9" CACHE STRING "MAVLink repository commit/tag" FORCE)
+set(QGC_MAVLINK_GIT_TAG "bc510f049c164f35a400ba16d0174151848ec20f" CACHE STRING "MAVLink repository commit/tag" FORCE)
 set(QGC_MAVLINK_DIALECT "custom" CACHE STRING "MAVLink dialect" FORCE)
 set(QGC_MAVLINK_DIALECT "all" CACHE STRING "MAVLink dialect" FORCE)
 set(QGC_MAVLINK_VERSION "2.0" CACHE STRING "MAVLink protocol version" FORCE)

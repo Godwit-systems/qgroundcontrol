@@ -3596,16 +3596,7 @@ void Vehicle::sendTargetRelative(double testValues)
     
     // mavlink_msg_send_target_coords_chan(
     
-    mavlink_msg_custom_test_message_pack_chan(
-        id(),
-        MAV_COMP_ID_MISSIONPLANNER,
-        link->mavlinkChannel(),
-        &msg,
-        static_cast<uint64_t>(QDateTime::currentMSecsSinceEpoch()) * 1000, // us
-        CUSTOM_TEST_STATUS_RUNNING,
-        testValues,
-        "target coords"   // char[16] - truncated/padded to 16 bytes internally
-    );
+
 
     
     sendMessageOnLinkThreadSafe(link.get(), msg);
