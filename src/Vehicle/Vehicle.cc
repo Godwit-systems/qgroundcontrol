@@ -85,6 +85,8 @@
 
 #include <QtCore/QDateTime>
 
+#include "mavlink/development/mavlink_msg_target_relative.h"
+
 QGC_LOGGING_CATEGORY(VehicleLog, "Vehicle.Vehicle")
 
 #define UPDATE_TIMER 50
@@ -3579,3 +3581,30 @@ void Vehicle::setEventsMetadata(uint8_t compid, const QString &metadataJsonFileN
 }
 
 /*---------------------------------------------------------------------------*/
+void Vehicle::sendTargetRelative()
+{
+    mavlink_message_t msg;
+    float testValue = 43.0f;
+
+    SharedLinkInterfacePtr link = vehicleLinkManager()->primaryLink().lock();
+    if(!link) {
+        qWarning() << "sendtestmessage: no active link";
+        return;
+    }
+    
+    mavlink_msg_named_value_float_pack_chan(
+        id(),
+        MAV_COMP_ID_MISSIONPLANNER,
+        link->mavlinkChannel(),
+        &msg,
+        static_cast<uint32_t>(QDateTime::currentMSecsSinceEpoch()),
+        "NAAAAAAAAAAAME",
+        testValue
+    );
+    
+    
+    sendMessageOnLinkThreadSafe(link.get(), msg);
+    qDebug() << "SEND NAMED_VALUE_FLOAT TEST MESSAGE" << testValue;
+
+
+}

@@ -181,6 +181,7 @@ Qt*-linux*.tar.*
 pytest-of-*/
 .import_linter_cache/
 .venv/
+venv/
 
 # Vale prose linter (downloaded via `vale sync`)
 .github/styles/

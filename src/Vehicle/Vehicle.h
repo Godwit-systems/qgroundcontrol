@@ -408,6 +408,8 @@ public:
 
     Q_INVOKABLE void clearTargetPoint() { setTargetPointCoordinate(QGeoCoordinate()); }
 
+    Q_INVOKABLE void sendTargetRelative();
+
     bool    isInitialConnectComplete() const;
     QString gotoFlightMode          () const;
 

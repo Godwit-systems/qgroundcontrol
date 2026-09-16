@@ -38,9 +38,13 @@ Item {
     property bool targetVisible: false
     property var result: null
 
+    property bool acceptedThrow: false
+                    
+
     
     property real groundDistance: 0
     property real distance: 0
+    property real timeToHit: 0
 
 
     property real altitudeMeters: globals.activeVehicle ? globals.activeVehicle.altitudeRelative.value * 0.3048 : 0
@@ -137,7 +141,7 @@ Item {
             anchors.fill:       videoContentArea
             visible:            _showStreamLoader
             sourceComponent:    videoOutputComponent
-
+           
             property bool videoDisabled: QGroundControl.settingsManager.videoSettings.videoSource.rawValue === QGroundControl.settingsManager.videoSettings.disabledVideoSource
             
         }
@@ -160,6 +164,7 @@ Item {
             width:              parent.getWidth()
             anchors.centerIn:   parent
             visible:           _showStreamLoader || _showUvcLoader
+            focus: true
 
             // grid lines
             Item {
@@ -285,6 +290,13 @@ Item {
                             }
                             QGCLabel {
                                 width: parent.width
+                                text: "Time to Impact: " +
+                                    root.timeToHit.toFixed(2) + " s"
+                                color: "white"
+                                font.pointSize: ScreenTools.smallFontPointSize
+                            }
+                            QGCLabel {
+                                width: parent.width
                                 text: "GEO coords: " + root.result
                                 wrapMode: Text.WordWrap
                                 color: "white"
@@ -292,6 +304,41 @@ Item {
                             }
                         }
                     }
+
+
+                   
+
+                    Timer {
+                        id: acceptanceTimer
+                        interval: 1000
+                        repeat: false
+
+                        onTriggered: {
+                            root.acceptedThrow = true
+                            
+                            console.log("A held for 1 second")
+
+                            console.log("THROW!")
+                           
+                        }
+                    }
+
+                    Keys.onPressed: (event) => {
+                        if (event.key === Qt.Key_A && !event.isAutoRepeat) {
+                            acceptanceTimer.start()
+                            event.accepted = true
+                        }
+                    }
+
+                    Keys.onReleased: (event) => {
+                        if (event.key === Qt.Key_A && !event.isAutoRepeat) {
+                            acceptanceTimer.stop()
+                            root.acceptedThrow = false
+                            event.accepted = true
+                        }
+                    }
+
+
 
                     // Mouse/touch input
                     TapHandler {
@@ -301,6 +348,12 @@ Item {
                         grabPermissions: PointerHandler.CanTakeOverFromAnything
 
                         onTapped: function(eventPoint) {
+                            
+                            if(root.acceptedThrow){
+                                console.log("pressed a for 1 secund")
+                            } else {
+                                console.log("didnt press a long enough")
+                            }
 
                             // eventPoint.position is already relative to videoContentArea
                             var x = eventPoint.position.x
@@ -331,7 +384,10 @@ Item {
                                 imageY,
                                 altitudeMeters
                             )
-                                                     
+
+                            root.timeToHit = CameraCalculator.calculateTimeInSeconds(
+                                altitudeMeters
+                            )
                            
                             var droneHeading  = _activeVehicle ? _activeVehicle.heading.rawValue : 0.0
                             var droneCoords = QtPositioning.coordinate(
@@ -348,12 +404,16 @@ Item {
                             // same function to mame target point
                             if (globals.activeVehicle && root.result.isValid) {
                                 globals.activeVehicle.doSetTargetPoint(root.result)
+                                console.log("Sending target_relative")
+                                globals.activeVehicle.sendTargetRelative()
+                            } else {
+                                console.log("No active Vehicle")
                             }
-
                           
 
                         }
-
+                        
+                        
                      
 
 

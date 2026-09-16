@@ -1908,6 +1908,7 @@ void MockLink::_handleCommandLongSetMessageInterval(const mavlink_command_long_t
         MAVLINK_MSG_ID_POSITION_TARGET_LOCAL_NED,
         MAVLINK_MSG_ID_NAV_CONTROLLER_OUTPUT,
         MAVLINK_MSG_ID_VFR_HUD,
+        MAVLINK_MSG_ID_TARGET_RELATIVE,
     };
     accepted = kPidTuningMessageIds.contains(static_cast<int>(request.param1));
 }

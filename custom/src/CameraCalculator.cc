@@ -93,6 +93,18 @@ double CameraCalculator::calculateDistanceToTarget(
     );
 }
 
+double CameraCalculator::calculateTimeInSeconds(
+    double altitudeMeters
+) const
+{
+    if (altitudeMeters <= 0.0) {
+        return 0.0;
+    }
+    return qSqrt(
+        (2 * altitudeMeters) / 9.81
+    );
+}
+
 QGeoCoordinate CameraCalculator::calculateTargetCoordinate(
     double targetX,
     double targetY,

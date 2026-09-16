@@ -45,7 +45,8 @@ qgc_require_cpm_added(mavlink)
 
 add_dependencies(${CMAKE_PROJECT_NAME} mavlink)
 target_include_directories(${CMAKE_PROJECT_NAME}
-                           PRIVATE ${mavlink_BINARY_DIR}/include/mavlink
+                           PRIVATE ${mavlink_BINARY_DIR}/include
+                                    ${mavlink_BINARY_DIR}/include/mavlink
                                    ${mavlink_BINARY_DIR}/include/mavlink/${QGC_MAVLINK_DIALECT}
 )
 
