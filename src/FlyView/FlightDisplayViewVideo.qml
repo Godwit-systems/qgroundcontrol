@@ -44,6 +44,7 @@ Item {
     
     property real groundDistance: 0
     property real distance: 0
+    property real timeToHit: 0
 
 
     property real altitudeMeters: globals.activeVehicle ? globals.activeVehicle.altitudeRelative.value * 0.3048 : 0
@@ -289,6 +290,13 @@ Item {
                             }
                             QGCLabel {
                                 width: parent.width
+                                text: "Time to Impact: " +
+                                    root.timeToHit.toFixed(2) + " s"
+                                color: "white"
+                                font.pointSize: ScreenTools.smallFontPointSize
+                            }
+                            QGCLabel {
+                                width: parent.width
                                 text: "GEO coords: " + root.result
                                 wrapMode: Text.WordWrap
                                 color: "white"
@@ -374,6 +382,10 @@ Item {
                             root.distance = CameraCalculator.calculateDistanceToTarget(
                                 imageX,
                                 imageY,
+                                altitudeMeters
+                            )
+
+                            root.timeToHit = CameraCalculator.calculateTimeInSeconds(
                                 altitudeMeters
                             )
                            

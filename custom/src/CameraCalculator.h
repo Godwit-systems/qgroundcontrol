@@ -22,6 +22,10 @@ public:
         double altitudeMeters
     ) const;
 
+    Q_INVOKABLE double calculateTimeInSeconds(
+        double altitudeMeters
+    ) const;
+
     Q_INVOKABLE QGeoCoordinate calculateTargetCoordinate(
         double targetX,
         double targetY,
