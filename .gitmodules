@@ -1,0 +1,6 @@
+[submodule "libs/mavlink-custom"]
+	path = libs/mavlink-custom
+	url = https://github.com/juleskj/c_library_v2.git
+[submodule "libs/mavlink-def"]
+	path = libs/mavlink-def
+	url = https://github.com/juleskj/mavlink.git
