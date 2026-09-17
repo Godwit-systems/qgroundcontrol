@@ -14,14 +14,11 @@ AnalyzePage {
     pageComponent:      pageComponent
     allowPopout:        true
 
-    property var    curSystem:          controller ? controller.activeSystem : null
+    property var    curSystem:          MAVLinkInspectorController.activeSystem
     property var    curMessage:         curSystem && curSystem.messages.count ? curSystem.messages.get(curSystem.selected) : null
     property int    curCompID:          0
     property real   maxButtonWidth:     0
-
-    MAVLinkInspectorController {
-        id: controller
-    }
+    readonly property var controller:   MAVLinkInspectorController
 
     function updateEnabledStatus(repeater, message, chart) {
         if(!message) {

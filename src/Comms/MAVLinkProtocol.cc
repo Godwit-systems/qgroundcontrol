@@ -182,6 +182,16 @@ void MAVLinkProtocol::_updateCounters(uint8_t mavlinkChannel, const mavlink_mess
     _runningLossPercent[mavlinkChannel] = (currentLossPercent + _runningLossPercent[mavlinkChannel]) * 0.5f;
 }
 
+void MAVLinkProtocol::forwardOutgoing(const mavlink_message_t& message)
+{
+    if (message.msgid != MAVLINK_MSG_ID_SETUP_SIGNING) {
+        emit outgoingMessage(message);
+    }
+
+    _forward(message);
+    _forwardSupport(message);
+}
+
 void MAVLinkProtocol::_forward(const mavlink_message_t& message)
 {
     if (message.msgid == MAVLINK_MSG_ID_SETUP_SIGNING) {

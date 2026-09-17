@@ -38,6 +38,11 @@ public:
     /// Reset sequence tracking so signing transitions don't inflate loss counters.
     void resetSequenceTracking(LinkInterface* link);
 
+    /// Copy a GCS-outbound message onto the MAVLink forwarding link (if enabled).
+    /// Vehicle-inbound traffic is already forwarded from receiveBytes; this covers GCS → vehicle
+    /// so a listener on localhost:14445 can see messages such as TARGET_RELATIVE.
+    void forwardOutgoing(const mavlink_message_t& message);
+
     void suspendLogForReplay(bool suspend) { _logSuspendReplay = suspend; }
 
     void checkForLostLogFiles();
@@ -47,6 +52,9 @@ signals:
                               int vehicleType);
 
     void messageReceived(LinkInterface* link, const mavlink_message_t& message);
+
+    /// GCS → vehicle traffic. MAVLink Inspector uses this because messageReceived is inbound-only.
+    void outgoingMessage(const mavlink_message_t& message);
 
     void mavlinkMessageStatus(int sysid, uint64_t totalSent, uint64_t totalReceived, uint64_t totalLoss,
                               float lossPercent);

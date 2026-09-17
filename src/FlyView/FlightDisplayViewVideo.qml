@@ -389,11 +389,11 @@ Item {
                                 altitudeMeters
                             )
                            
-                            var droneHeading  = _activeVehicle ? _activeVehicle.heading.rawValue : 0.0
-                            var droneCoords = QtPositioning.coordinate(
-                                globals.activeVehicle.coordinate.latitude,
-                                globals.activeVehicle.coordinate.longitude
-                            )
+                            var vehicle = globals.activeVehicle
+                            var droneHeading = vehicle ? vehicle.heading.rawValue : 0.0
+                            var droneCoords = vehicle
+                                ? QtPositioning.coordinate(vehicle.coordinate.latitude, vehicle.coordinate.longitude)
+                                : QtPositioning.coordinate()
                             root.result = CameraCalculator.calculateTargetCoordinate(
                                 imageX, imageY, altitudeMeters, droneCoords, droneHeading
                             )
@@ -401,11 +401,28 @@ Item {
                             console.log("Target coordinate:", root.result)
                             console.log("Lat:", root.result.latitude, "Lon:", root.result.longitude)
 
-                            // same function to mame target point
-                            if (globals.activeVehicle && root.result.isValid) {
-                                globals.activeVehicle.doSetTargetPoint(root.result)
-                                console.log("Sending target_relative")
-                                globals.activeVehicle.sendTargetRelative()
+                            if (vehicle && root.result.isValid && root.acceptedThrow) {
+                                vehicle.doSetTargetPoint(root.result)
+                                var observation = CameraCalculator.calculateTargetRelative(
+                                    imageX,
+                                    imageY,
+                                    altitudeMeters,
+                                    vehicle.roll.rawValue,
+                                    vehicle.pitch.rawValue,
+                                    vehicle.heading.rawValue
+                                )
+                                console.log("Sending TARGET_RELATIVE",
+                                            observation.forwardMeters, observation.rightMeters, altitudeMeters,
+                                            observation.posStd, observation.yawStd,
+                                            observation.qTarget, observation.qSensor)
+                                vehicle.sendTargetRelative(
+                                    observation.forwardMeters,
+                                    observation.rightMeters,
+                                    altitudeMeters,
+                                    observation.posStd,
+                                    observation.yawStd,
+                                    observation.qTarget,
+                                    observation.qSensor)
                             } else {
                                 console.log("No active Vehicle")
                             }

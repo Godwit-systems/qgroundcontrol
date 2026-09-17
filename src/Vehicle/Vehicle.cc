@@ -3581,30 +3581,87 @@ void Vehicle::setEventsMetadata(uint8_t compid, const QString &metadataJsonFileN
 }
 
 /*---------------------------------------------------------------------------*/
-void Vehicle::sendTargetRelative()
+void Vehicle::sendTargetRelative(
+    double forwardMeters,
+    double rightMeters,
+    double downMeters,
+    const QVariantList &posStdList,
+    double yawStd,
+    const QVariantList &qTargetList,
+    const QVariantList &qSensorList)
 {
-    mavlink_message_t msg;
-    float testValue = 43.0f;
-
-    SharedLinkInterfacePtr link = vehicleLinkManager()->primaryLink().lock();
-    if(!link) {
-        qWarning() << "sendtestmessage: no active link";
+    SharedLinkInterfacePtr sharedLink = vehicleLinkManager()->primaryLink().lock();
+    if (!sharedLink) {
+        qCWarning(VehicleLog) << "primary link gone";
         return;
     }
-    
-    mavlink_msg_named_value_float_pack_chan(
-        id(),
-        MAV_COMP_ID_MISSIONPLANNER,
-        link->mavlinkChannel(),
+
+    const auto copyFloatList = [](const QVariantList &list, float *out, int count) {
+        if (!out || list.size() != count) {
+            return false;
+        }
+        for (int i = 0; i < count; ++i) {
+            bool ok = false;
+            out[i] = static_cast<float>(list.at(i).toDouble(&ok));
+            if (!ok) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    float posStd[3]{};
+    float qTarget[4]{};
+    float qSensor[4]{};
+    if (!copyFloatList(posStdList, posStd, 3)
+        || !copyFloatList(qTargetList, qTarget, 4)
+        || !copyFloatList(qSensorList, qSensor, 4)) {
+        qCWarning(VehicleLog) << "invalid observation arrays"
+                              << "posStd" << posStdList.size()
+                              << "qTarget" << qTargetList.size()
+                              << "qSensor" << qSensorList.size();
+        return;
+    }
+
+    // msgid 511 cannot be framed as MAVLink v1 (8-bit msgid).
+    mavlink_set_proto_version(sharedLink->mavlinkChannel(), 2);
+
+    mavlink_message_t msg{};
+    (void) mavlink_msg_target_relative_pack_chan(
+        static_cast<uint8_t>(MAVLinkProtocol::instance()->getSystemId()),
+        static_cast<uint8_t>(MAVLinkProtocol::getComponentId()),
+        sharedLink->mavlinkChannel(),
         &msg,
-        static_cast<uint32_t>(QDateTime::currentMSecsSinceEpoch()),
-        "NAAAAAAAAAAAME",
-        testValue
-    );
-    
-    
-    sendMessageOnLinkThreadSafe(link.get(), msg);
-    qDebug() << "SEND NAMED_VALUE_FLOAT TEST MESSAGE" << testValue;
+        static_cast<uint64_t>(QDateTime::currentMSecsSinceEpoch()) * 1000ull,
+        0, // target id
+        TARGET_OBS_FRAME_BODY_FRD,
+        static_cast<float>(forwardMeters),
+        static_cast<float>(rightMeters),
+        static_cast<float>(downMeters),
+        posStd,
+        static_cast<float>(yawStd),
+        qTarget,
+        qSensor,
+        LANDING_TARGET_TYPE_VISION_FIDUCIAL);
 
+    if (msg.magic != MAVLINK_STX) {
+        qCWarning(VehicleLog) << "packed as MAVLink v1, msgid 511 will not decode";
+        return;
+    }
 
+    if (!sendMessageOnLinkThreadSafe(sharedLink.get(), msg)) {
+        qCWarning(VehicleLog) << "send failed";
+        return;
+    }
+
+    qCDebug(VehicleLog) << "msgid" << msg.msgid
+                        << "x" << forwardMeters
+                        << "y" << rightMeters
+                        << "z" << downMeters
+                        << "posStd" << posStd[0] << posStd[1] << posStd[2]
+                        << "yawStd" << yawStd
+                        << "qTarget" << qTarget[0] << qTarget[1] << qTarget[2] << qTarget[3]
+                        << "qSensor" << qSensor[0] << qSensor[1] << qSensor[2] << qSensor[3];
 }
+
+

@@ -46,7 +46,7 @@ set(QGC_DISABLE_APM_PLUGIN_FACTORY ON CACHE BOOL "Disable APM Plugin Factory" FO
 set(QGC_DISABLE_PX4_PLUGIN_FACTORY ON CACHE BOOL "Disable PX4 Plugin Factory" FORCE)
 
 
-set(QGC_MAVLINK_DIALECT "all" CACHE STRING
+set(QGC_MAVLINK_DIALECT "development" CACHE STRING
     "MAVLink dialect used by QGroundControl" FORCE)
 
 set(CPM_mavlink_SOURCE
