@@ -19,6 +19,7 @@ class MAVLinkInspectorController : public QObject
 {
     Q_OBJECT
     QML_ELEMENT
+    QML_SINGLETON
     Q_MOC_INCLUDE("LinkInterface.h")
     Q_MOC_INCLUDE("Vehicle.h")
     Q_MOC_INCLUDE("MAVLinkSystem.h")
@@ -70,6 +71,7 @@ signals:
 
 private slots:
     void _receiveMessage(LinkInterface *link, const mavlink_message_t &message);
+    void _receiveOutgoingMessage(const mavlink_message_t &message);
     void _refreshFrequency();
     void _setActiveVehicle(Vehicle *vehicle);
     void _vehicleAdded(Vehicle *vehicle);
@@ -77,6 +79,7 @@ private slots:
 
 private:
     QGCMAVLinkSystem *_findVehicle(uint8_t id);
+    void _appendOrUpdateMessage(QGCMAVLinkSystem *system, const mavlink_message_t &message);
     uint8_t _selectedSystemID() const;
     uint8_t _selectedComponentID() const;
 

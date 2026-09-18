@@ -1,5 +1,6 @@
 #include "MAVLinkInspectorController.h"
 #include "MAVLinkChartController.h"
+#include "MAVLinkLib.h"
 #include "MAVLinkMessage.h"
 #include "MAVLinkProtocol.h"
 #include "MAVLinkSystem.h"
@@ -8,6 +9,7 @@
 #include "QmlObjectListModel.h"
 #include "Vehicle.h"
 
+#include <QtCore/QTimer>
 #include <QtQml/QQmlEngine>
 
 QGC_LOGGING_CATEGORY(MAVLinkInspectorControllerLog, "AnalyzeView.MAVLinkInspectorController")
@@ -44,7 +46,15 @@ MAVLinkInspectorController::MAVLinkInspectorController(QObject *parent)
 
     MAVLinkProtocol *const mavlinkProtocol = MAVLinkProtocol::instance();
     (void) connect(mavlinkProtocol, &MAVLinkProtocol::messageReceived, this, &MAVLinkInspectorController::_receiveMessage);
+    (void) connect(mavlinkProtocol, &MAVLinkProtocol::outgoingMessage, this, &MAVLinkInspectorController::_receiveOutgoingMessage);
     (void) connect(_updateFrequencyTimer, &QTimer::timeout, this, &MAVLinkInspectorController::_refreshFrequency);
+
+    for (int i = 0; i < multiVehicleManager->vehicles()->count(); i++) {
+        if (Vehicle *const vehicle = qobject_cast<Vehicle*>(multiVehicleManager->vehicles()->get(i))) {
+            _vehicleAdded(vehicle);
+        }
+    }
+    _setActiveVehicle(multiVehicleManager->activeVehicle());
 
     _updateFrequencyTimer->setInterval(1000);
     _updateFrequencyTimer->setSingleShot(false);
@@ -194,14 +204,23 @@ void MAVLinkInspectorController::_vehicleRemoved(const Vehicle *vehicle)
     emit systemsChanged();
 }
 
+void MAVLinkInspectorController::_appendOrUpdateMessage(QGCMAVLinkSystem *system, const mavlink_message_t &message)
+{
+    const QString instanceValue = QGCMAVLinkMessage::extractInstanceValue(message);
+    QGCMAVLinkMessage *msg = system->findMessage(message.msgid, message.compid, instanceValue);
+    if (!msg) {
+        msg = new QGCMAVLinkMessage(message, instanceValue, this);
+        system->append(msg);
+    } else {
+        msg->update(message);
+    }
+}
+
 void MAVLinkInspectorController::_receiveMessage(LinkInterface *link, const mavlink_message_t &message)
 {
     Q_UNUSED(link);
 
-    QGCMAVLinkMessage *msg = nullptr;
     QGCMAVLinkSystem *system = _findVehicle(message.sysid);
-    const QString instanceValue = QGCMAVLinkMessage::extractInstanceValue(message);
-
     if (!system) {
         system = new QGCMAVLinkSystem(message.sysid, this);
         _systems->append(system);
@@ -211,16 +230,25 @@ void MAVLinkInspectorController::_receiveMessage(LinkInterface *link, const mavl
             _activeSystem = system;
             emit activeSystemChanged();
         }
-    } else {
-        msg = system->findMessage(message.msgid, message.compid, instanceValue);
     }
 
-    if (!msg) {
-        msg = new QGCMAVLinkMessage(message, instanceValue, this);
-        system->append(msg);
-    } else {
-        msg->update(message);
+    _appendOrUpdateMessage(system, message);
+}
+
+void MAVLinkInspectorController::_receiveOutgoingMessage(const mavlink_message_t &message)
+{
+    _receiveMessage(nullptr, message);
+
+    // GCS-outbound traffic (TARGET_RELATIVE, commands) is packed with the GCS sysid (default 255).
+    // The inspector stays on the connected vehicle, so also file non-heartbeat GCS messages there.
+    if (!_activeSystem || (message.sysid == _activeSystem->id())) {
+        return;
     }
+    if (message.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
+        return;
+    }
+
+    _appendOrUpdateMessage(_activeSystem, message);
 }
 
 void MAVLinkInspectorController::setActiveSystem(int systemId)

@@ -2,6 +2,7 @@
 #include "MAVLinkLib.h"
 #include "LinkManager.h"
 #include "AppMessages.h"
+#include "MAVLinkProtocol.h"
 #include "QGCApplication.h"
 #include "QGCLoggingCategory.h"
 #include "SigningController.h"
@@ -109,7 +110,8 @@ bool LinkInterface::_allocateMavlinkChannel()
 
     qCDebug(LinkInterfaceLog) << "_allocateMavlinkChannel" << _mavlinkChannel;
 
-    mavlink_set_proto_version(_mavlinkChannel, MAVLINK_VERSION); // We only support v2 protcol
+    // development.xml sets MAVLINK_VERSION to 0; msgid >= 256 requires MAVLink v2.
+    mavlink_set_proto_version(_mavlinkChannel, 2);
 
     _signingController = std::make_unique<SigningController>(static_cast<mavlink_channel_t>(_mavlinkChannel));
     _signingController->clearSigning();
@@ -154,6 +156,17 @@ void LinkInterface::sendMessageThreadSafe(mavlink_message_t &message)
     // disabled or the message isn't outgoing-signed. The secret key stays in the signing layer.
     if (_signingController) {
         (void) _signingController->signOutgoing(message);
+    }
+
+    // Forward GCS → vehicle traffic onto the MAVLink forwarding UDP port (if enabled).
+    // Hop to the protocol thread: sendMessageThreadSafe can run off the main thread.
+    if (_config && !_config->isForwarding()) {
+        if (MAVLinkProtocol* const protocol = MAVLinkProtocol::instance()) {
+            const mavlink_message_t messageCopy = message;
+            (void) QMetaObject::invokeMethod(protocol, [protocol, messageCopy]() {
+                protocol->forwardOutgoing(messageCopy);
+            }, Qt::AutoConnection);
+        }
     }
 
     uint8_t buffer[MAVLINK_MAX_PACKET_LEN];

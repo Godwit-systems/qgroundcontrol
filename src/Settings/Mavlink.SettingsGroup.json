@@ -40,8 +40,8 @@
         },
         {
             "name": "forwardMavlink",
-            "shortDesc": "Forward all MAVLink messages to an external address for other ground stations.",
-            "longDesc": "Enable mavlink forwarding",
+            "shortDesc": "Forward inbound and GCS-outbound MAVLink messages to an external address.",
+            "longDesc": "Enable MAVLink forwarding of vehicle telemetry and GCS-outbound messages (commands, TARGET_RELATIVE, etc.)",
             "type": "bool",
             "default": false,
             "label": "Enable",

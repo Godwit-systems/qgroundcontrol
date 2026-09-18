@@ -408,7 +408,16 @@ public:
 
     Q_INVOKABLE void clearTargetPoint() { setTargetPointCoordinate(QGeoCoordinate()); }
 
-    Q_INVOKABLE void sendTargetRelative();
+    Q_INVOKABLE void sendTargetRelative(
+        double forwardMeters,
+        double rightMeters,
+        double downMeters,
+        const QVariantList &posStd,
+        double yawStd,
+        const QVariantList &qTarget,
+        const QVariantList &qSensor);
+
+
 
     bool    isInitialConnectComplete() const;
     QString gotoFlightMode          () const;
