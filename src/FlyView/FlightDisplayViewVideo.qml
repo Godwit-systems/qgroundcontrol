@@ -215,7 +215,41 @@ Item {
                         x: root.targetNormX * videoContentArea.width - width / 2
                         y: root.targetNormY * videoContentArea.height - height / 2
                     }
+                   Rectangle {
+                        id: toast
+                        width: toastLabel.implicitWidth + ScreenTools.defaultFontPixelWidth * 3
+                        height: toastLabel.implicitHeight + ScreenTools.defaultFontPixelHeight
+                        visible: false
+                        z: 10001
+                        anchors.horizontalCenter: videoContentArea.horizontalCenter
+                        anchors.top: videoContentArea.top
+                        anchors.topMargin: ScreenTools.defaultFontPixelHeight
+                        radius: 6
+                        color: Qt.rgba(0, 0, 0, 0.75)
+                        border.color: "white"
+                        border.width: 1
 
+                        QGCLabel {
+                            id: toastLabel
+                            anchors.centerIn: parent
+                            text: qsTr("Target sent")
+                            color: "white"
+                            font.pointSize: ScreenTools.smallFontPointSize
+                        }
+
+                        Timer {
+                            id: toastHideTimer
+                            interval: 2000
+                            repeat: false
+                            onTriggered: toast.visible = false
+                        }
+
+                        function show(message) {
+                            toastLabel.text = message
+                            visible = true
+                            toastHideTimer.restart()
+                        }
+                   }
                      // values
                    Rectangle {
                         id: targetValues
@@ -231,7 +265,7 @@ Item {
                         anchors.bottom: videoContentArea.bottom
 
                         radius: 6
-                        color: Qt.rgba(0, 0, 0, 0.75)
+                        color: root.acceptedThrow ? "#FD1818": Qt.rgba(0, 0, 0, 0.75)
                         border.color: "white"
                         border.width: 1
 
@@ -415,14 +449,16 @@ Item {
                                             observation.forwardMeters, observation.rightMeters, altitudeMeters,
                                             observation.posStd, observation.yawStd,
                                             observation.qTarget, observation.qSensor)
-                                vehicle.sendTargetRelative(
-                                    observation.forwardMeters,
-                                    observation.rightMeters,
-                                    altitudeMeters,
-                                    observation.posStd,
-                                    observation.yawStd,
-                                    observation.qTarget,
-                                    observation.qSensor)
+                                if (vehicle.sendTargetRelative(
+                                        observation.forwardMeters,
+                                        observation.rightMeters,
+                                        altitudeMeters,
+                                        observation.posStd,
+                                        observation.yawStd,
+                                        observation.qTarget,
+                                        observation.qSensor)) {
+                                    toast.show(qsTr("Target sent"))
+                                }
                             } else {
                                 console.log("No active Vehicle")
                             }

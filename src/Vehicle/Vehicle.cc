@@ -3581,7 +3581,7 @@ void Vehicle::setEventsMetadata(uint8_t compid, const QString &metadataJsonFileN
 }
 
 /*---------------------------------------------------------------------------*/
-void Vehicle::sendTargetRelative(
+bool Vehicle::sendTargetRelative(
     double forwardMeters,
     double rightMeters,
     double downMeters,
@@ -3593,7 +3593,7 @@ void Vehicle::sendTargetRelative(
     SharedLinkInterfacePtr sharedLink = vehicleLinkManager()->primaryLink().lock();
     if (!sharedLink) {
         qCWarning(VehicleLog) << "primary link gone";
-        return;
+        return false;
     }
 
     const auto copyFloatList = [](const QVariantList &list, float *out, int count) {
@@ -3620,7 +3620,7 @@ void Vehicle::sendTargetRelative(
                               << "posStd" << posStdList.size()
                               << "qTarget" << qTargetList.size()
                               << "qSensor" << qSensorList.size();
-        return;
+        return false;
     }
 
     // msgid 511 cannot be framed as MAVLink v1 (8-bit msgid).
@@ -3646,12 +3646,12 @@ void Vehicle::sendTargetRelative(
 
     if (msg.magic != MAVLINK_STX) {
         qCWarning(VehicleLog) << "packed as MAVLink v1, msgid 511 will not decode";
-        return;
+        return false;
     }
 
     if (!sendMessageOnLinkThreadSafe(sharedLink.get(), msg)) {
         qCWarning(VehicleLog) << "send failed";
-        return;
+        return false;
     }
 
     qCDebug(VehicleLog) << "msgid" << msg.msgid
@@ -3662,6 +3662,7 @@ void Vehicle::sendTargetRelative(
                         << "yawStd" << yawStd
                         << "qTarget" << qTarget[0] << qTarget[1] << qTarget[2] << qTarget[3]
                         << "qSensor" << qSensor[0] << qSensor[1] << qSensor[2] << qSensor[3];
+    return true;
 }
 
 

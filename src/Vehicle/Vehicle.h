@@ -408,7 +408,7 @@ public:
 
     Q_INVOKABLE void clearTargetPoint() { setTargetPointCoordinate(QGeoCoordinate()); }
 
-    Q_INVOKABLE void sendTargetRelative(
+    Q_INVOKABLE bool sendTargetRelative(
         double forwardMeters,
         double rightMeters,
         double downMeters,

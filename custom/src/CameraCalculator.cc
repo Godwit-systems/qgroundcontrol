@@ -100,7 +100,7 @@ QGeoCoordinate CameraCalculator::calculateTargetCoordinate(
     double headingDegrees
 ) const
 {
-    if (altitudeMeters <= 0.0 || !droneCoordinate.isValid()) {
+    if (!droneCoordinate.isValid()) {
         return QGeoCoordinate();
     }
 
