@@ -16,11 +16,24 @@ function(qgc_set_qt_resource_alias)
             continue()
         endif()
         get_filename_component(alias "${resource_file}" NAME)
-        set_source_files_properties("${resource_file}"
-            PROPERTIES
-                QT_RESOURCE_ALIAS "${alias}"
-        )
+        set_source_files_properties("${resource_file}" PROPERTIES QT_RESOURCE_ALIAS "${alias}")
     endforeach()
+endfunction()
+
+# ----------------------------------------------------------------------------
+# _qgc_write_if_changed
+# Writes a generated build-dir file only when its content differs, so the mtime
+# stays stable across reconfigures. AUTOMOC re-runs moc for every target when
+# its executable (the moccache launcher) is newer than the generated files.
+# ----------------------------------------------------------------------------
+function(_qgc_write_if_changed path content)
+    if(EXISTS "${path}")
+        file(READ "${path}" _existing)
+        if(_existing STREQUAL content)
+            return()
+        endif()
+    endif()
+    file(WRITE "${path}" "${content}")
 endfunction()
 
 # ----------------------------------------------------------------------------
@@ -28,30 +41,27 @@ endfunction()
 # Configures compiler caching using ccache or sccache if available
 # ----------------------------------------------------------------------------
 function(qgc_config_caching)
+    # Reject unusable cache executables found on PATH.
     function(_qgc_verify_cache_tool _ok _path)
         execute_process(
             COMMAND "${_path}" --version
             RESULT_VARIABLE _res
-            OUTPUT_QUIET
-            ERROR_QUIET
+            OUTPUT_QUIET ERROR_QUIET
         )
         if(NOT _res EQUAL 0)
-            set(${_ok} FALSE PARENT_SCOPE)
+            set(${_ok}
+                FALSE
+                PARENT_SCOPE
+            )
         endif()
     endfunction()
 
     # Allow presets to prefer a specific backend via QGC_CACHE_BACKEND
     if(QGC_CACHE_BACKEND)
-        find_program(QGC_CACHE_PROGRAM
-            NAMES "${QGC_CACHE_BACKEND}"
-            VALIDATOR _qgc_verify_cache_tool
-        )
+        find_program(QGC_CACHE_PROGRAM NAMES "${QGC_CACHE_BACKEND}" VALIDATOR _qgc_verify_cache_tool)
     endif()
     if(NOT QGC_CACHE_PROGRAM)
-        find_program(QGC_CACHE_PROGRAM
-            NAMES ccache sccache
-            VALIDATOR _qgc_verify_cache_tool
-        )
+        find_program(QGC_CACHE_PROGRAM NAMES ccache sccache VALIDATOR _qgc_verify_cache_tool)
     endif()
 
     if(QGC_CACHE_PROGRAM)
@@ -62,18 +72,16 @@ function(qgc_config_caching)
         if(_cache_tool STREQUAL "ccache")
             set(_ccache_conf "${CMAKE_SOURCE_DIR}/tools/configs/ccache.conf")
             if(CMAKE_HOST_WIN32)
-                # Windows: set env vars at configure time (inherited by Ninja).
-                # Only set defaults so external cache setups (CI/IDE) are not clobbered.
-                if(EXISTS "${_ccache_conf}" AND (NOT DEFINED ENV{CCACHE_CONFIGPATH} OR "$ENV{CCACHE_CONFIGPATH}" STREQUAL ""))
-                    set(ENV{CCACHE_CONFIGPATH} "${_ccache_conf}")
-                endif()
-                if(NOT DEFINED ENV{CCACHE_DIR} OR "$ENV{CCACHE_DIR}" STREQUAL "")
-                    set(ENV{CCACHE_DIR} "${CMAKE_SOURCE_DIR}/.ccache")
-                endif()
-                if(NOT DEFINED ENV{CCACHE_BASEDIR} OR "$ENV{CCACHE_BASEDIR}" STREQUAL "")
-                    set(ENV{CCACHE_BASEDIR} "${CMAKE_SOURCE_DIR}")
-                endif()
-                set(_cache_launcher "${QGC_CACHE_PROGRAM}")
+                set(_ccache_wrapper "${CMAKE_BINARY_DIR}/ccache-launcher.cmd")
+                configure_file("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/ccache-launcher.cmd.in" "${_ccache_wrapper}" @ONLY
+                               NEWLINE_STYLE DOS
+                )
+                set(_cache_launcher "${_ccache_wrapper}")
+                # Batch launchers have cmd.exe's 8191-character limit, below Ninja's native Windows limit.
+                set(CMAKE_NINJA_FORCE_RESPONSE_FILE
+                    ON
+                    PARENT_SCOPE
+                )
             else()
                 # Unix: wrapper script to set env vars at build time.
                 # Use defaults so external cache setups (CI/IDE) can override.
@@ -85,8 +93,21 @@ function(qgc_config_caching)
                 string(APPEND _wrapper "export CCACHE_DIR=\"\${CCACHE_DIR:-${CMAKE_SOURCE_DIR}/.ccache}\"\n")
                 string(APPEND _wrapper "export CCACHE_BASEDIR=\"\${CCACHE_BASEDIR:-${CMAKE_SOURCE_DIR}}\"\n")
                 string(APPEND _wrapper "exec \"${QGC_CACHE_PROGRAM}\" \"$@\"\n")
-                file(WRITE "${_ccache_wrapper}" "${_wrapper}")
-                file(CHMOD "${_ccache_wrapper}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+                _qgc_write_if_changed("${_ccache_wrapper}" "${_wrapper}")
+                # cmakelang 0.6.13 does not recognize file(CHMOD).
+                # cmake-lint: disable=E1126
+                file(
+                    CHMOD
+                    "${_ccache_wrapper}"
+                    PERMISSIONS
+                    OWNER_READ
+                    OWNER_WRITE
+                    OWNER_EXECUTE
+                    GROUP_READ
+                    GROUP_EXECUTE
+                    WORLD_READ
+                    WORLD_EXECUTE
+                )
                 set(_cache_launcher "${_ccache_wrapper}")
             endif()
         elseif(_cache_tool STREQUAL "sccache")
@@ -95,8 +116,14 @@ function(qgc_config_caching)
             return()
         endif()
 
-        set(CMAKE_C_COMPILER_LAUNCHER "${_cache_launcher}" CACHE STRING "C compiler launcher" FORCE)
-        set(CMAKE_CXX_COMPILER_LAUNCHER "${_cache_launcher}" CACHE STRING "CXX compiler launcher" FORCE)
+        set(CMAKE_C_COMPILER_LAUNCHER
+            "${_cache_launcher}"
+            CACHE STRING "C compiler launcher" FORCE
+        )
+        set(CMAKE_CXX_COMPILER_LAUNCHER
+            "${_cache_launcher}"
+            CACHE STRING "CXX compiler launcher" FORCE
+        )
         # Linker launchers not currently used but available if needed
         # set(CMAKE_C_LINKER_LAUNCHER "${QGC_CACHE_PROGRAM}" CACHE STRING "C linker cache")
         # set(CMAKE_CXX_LINKER_LAUNCHER "${QGC_CACHE_PROGRAM}" CACHE STRING "CXX linker cache")
@@ -110,11 +137,83 @@ function(qgc_config_caching)
 endfunction()
 
 # ----------------------------------------------------------------------------
+# _qgc_write_moccache_stats_script
+# Writes a post-build script that prints moccache hit/miss stats for the
+# ninja build currently running (entries newer than the build start derived
+# from .ninja_log, from this build dir). It is a no-op unless MOCCACHE_STATS
+# is set in the build environment.
+# ----------------------------------------------------------------------------
+function(_qgc_write_moccache_stats_script python moccache_py out_var)
+    set(_default_dir "${CMAKE_SOURCE_DIR}/.cache/moccache")
+    if(CMAKE_HOST_WIN32)
+        set(_script "${CMAKE_BINARY_DIR}/moccache-stats.cmd")
+        set(_body "@echo off\r\nsetlocal\r\n")
+        string(APPEND _body "if not defined MOCCACHE_STATS exit /b 0\r\n")
+        string(APPEND _body "if not defined MOCCACHE_DIR set \"MOCCACHE_DIR=${_default_dir}\"\r\n")
+        string(APPEND _body "if not defined MOCCACHE_BASEDIR set \"MOCCACHE_BASEDIR=${CMAKE_BINARY_DIR}\"\r\n")
+        string(APPEND _body "\"${python}\" \"${moccache_py}\" --show-stats --build-dir \"${CMAKE_BINARY_DIR}\"\r\n")
+        string(APPEND _body "exit /b 0\r\n")
+        _qgc_write_if_changed("${_script}" "${_body}")
+    else()
+        set(_script "${CMAKE_BINARY_DIR}/moccache-stats")
+        set(_body "#!/bin/sh\n")
+        string(APPEND _body "[ -n \"\${MOCCACHE_STATS}\" ] || exit 0\n")
+        string(APPEND _body "export MOCCACHE_DIR=\"\${MOCCACHE_DIR:-${_default_dir}}\"\n")
+        string(APPEND _body "export MOCCACHE_BASEDIR=\"\${MOCCACHE_BASEDIR:-${CMAKE_BINARY_DIR}}\"\n")
+        string(APPEND _body
+               "\"${python}\" \"${moccache_py}\" --show-stats --build-dir \"${CMAKE_BINARY_DIR}\" || true\n"
+        )
+        _qgc_write_if_changed("${_script}" "${_body}")
+        # cmakelang 0.6.13 does not recognize file(CHMOD).
+        # cmake-lint: disable=E1126
+        file(
+            CHMOD
+            "${_script}"
+            PERMISSIONS
+            OWNER_READ
+            OWNER_WRITE
+            OWNER_EXECUTE
+            GROUP_READ
+            GROUP_EXECUTE
+            WORLD_READ
+            WORLD_EXECUTE
+        )
+    endif()
+    set(${out_var}
+        "${_script}"
+        PARENT_SCOPE
+    )
+endfunction()
+
+# ----------------------------------------------------------------------------
+# _qgc_verify_moccache_python
+# find_program VALIDATOR: moccache.py targets Python 3.10 (ruff.toml); an older
+# interpreter would fail on every moc invocation, so reject it and let
+# qgc_config_moccache fall back to plain moc.
+# ----------------------------------------------------------------------------
+function(_qgc_verify_moccache_python _ok _path)
+    execute_process(
+        COMMAND "${_path}" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"
+        RESULT_VARIABLE _res
+        OUTPUT_QUIET ERROR_QUIET
+    )
+    if(NOT _res EQUAL 0)
+        set(${_ok}
+            FALSE
+            PARENT_SCOPE
+        )
+    endif()
+endfunction()
+
+# ----------------------------------------------------------------------------
 # qgc_config_moccache
 # Routes AUTOMOC through tools/moccache.py so moc output is cached across
 # clean builds. Must be called after find_package(Qt6).
 # ----------------------------------------------------------------------------
 function(qgc_config_moccache)
+    # Keep both platform launchers alongside their shared tool validation.
+    # cmakelang 0.6.13 also does not recognize file(CHMOD).
+    # cmake-lint: disable=R0915,E1126
     if(DEFINED CMAKE_AUTOMOC_EXECUTABLE AND NOT CMAKE_AUTOMOC_EXECUTABLE STREQUAL "")
         return()
     endif()
@@ -129,9 +228,17 @@ function(qgc_config_moccache)
         return()
     endif()
 
-    find_program(QGC_MOCCACHE_PYTHON NAMES python3 python)
+    # find_program skips VALIDATOR for a cached result; recheck one left by an older configure.
+    if(QGC_MOCCACHE_PYTHON)
+        set(_python_ok TRUE)
+        _qgc_verify_moccache_python(_python_ok "${QGC_MOCCACHE_PYTHON}")
+        if(NOT _python_ok)
+            unset(QGC_MOCCACHE_PYTHON CACHE)
+        endif()
+    endif()
+    find_program(QGC_MOCCACHE_PYTHON NAMES python3 python VALIDATOR _qgc_verify_moccache_python)
     if(NOT QGC_MOCCACHE_PYTHON)
-        message(STATUS "QGC: python3 not found - building without moc caching")
+        message(STATUS "QGC: python3 >= 3.10 not found - building without moc caching")
         return()
     endif()
 
@@ -150,15 +257,11 @@ function(qgc_config_moccache)
         string(APPEND _wrapper
                "if not defined MOCCACHE_DIR set \"MOCCACHE_DIR=${CMAKE_SOURCE_DIR}/.cache/moccache\"\r\n"
         )
-        string(APPEND _wrapper
-               "if not defined MOCCACHE_BASEDIR set \"MOCCACHE_BASEDIR=${CMAKE_BINARY_DIR}\"\r\n"
-        )
+        string(APPEND _wrapper "if not defined MOCCACHE_BASEDIR set \"MOCCACHE_BASEDIR=${CMAKE_BINARY_DIR}\"\r\n")
         string(APPEND _wrapper "if not defined MOCCACHE_MAX_SIZE set \"MOCCACHE_MAX_SIZE=256M\"\r\n")
-        string(APPEND _wrapper
-               "\"${QGC_MOCCACHE_PYTHON}\" \"${_moccache_py}\" --real-moc \"${_real_moc}\" %*\r\n"
-        )
+        string(APPEND _wrapper "\"${QGC_MOCCACHE_PYTHON}\" \"${_moccache_py}\" --real-moc \"${_real_moc}\" %*\r\n")
         string(APPEND _wrapper "exit /b %ERRORLEVEL%\r\n")
-        file(WRITE "${_moccache_wrapper}" "${_wrapper}")
+        _qgc_write_if_changed("${_moccache_wrapper}" "${_wrapper}")
     else()
         set(_moccache_wrapper "${CMAKE_BINARY_DIR}/moccache-launcher")
         set(_wrapper "#!/bin/sh\n")
@@ -168,7 +271,7 @@ function(qgc_config_moccache)
         string(APPEND _wrapper
                "exec \"${QGC_MOCCACHE_PYTHON}\" \"${_moccache_py}\" --real-moc \"${_real_moc}\" \"$@\"\n"
         )
-        file(WRITE "${_moccache_wrapper}" "${_wrapper}")
+        _qgc_write_if_changed("${_moccache_wrapper}" "${_wrapper}")
         file(
             CHMOD
             "${_moccache_wrapper}"
@@ -183,7 +286,10 @@ function(qgc_config_moccache)
         )
     endif()
 
+    _qgc_write_moccache_stats_script("${QGC_MOCCACHE_PYTHON}" "${_moccache_py}" _moccache_stats)
+
     set_property(GLOBAL PROPERTY QGC_MOCCACHE_EXECUTABLE "${_moccache_wrapper}")
+    set_property(GLOBAL PROPERTY QGC_MOCCACHE_STATS_EXECUTABLE "${_moccache_stats}")
     message(STATUS "QGC: Using moccache for AUTOMOC (${_real_moc})")
 endfunction()
 
@@ -222,11 +328,27 @@ function(_qgc_apply_moccache_to_directory directory)
     endforeach()
 endfunction()
 
-# Apply the configured moccache launcher to every AUTOMOC target.
+# Apply the configured moccache launcher to every AUTOMOC target and print
+# this build's hit/miss stats after the main executable links (when
+# MOCCACHE_STATS is set). Ninja only: the per-build scoping needs .ninja_log.
 function(qgc_apply_moccache)
     get_property(_moccache_wrapper GLOBAL PROPERTY QGC_MOCCACHE_EXECUTABLE)
     if(_moccache_wrapper)
         _qgc_apply_moccache_to_directory("${CMAKE_SOURCE_DIR}")
+    endif()
+
+    get_property(_moccache_stats GLOBAL PROPERTY QGC_MOCCACHE_STATS_EXECUTABLE)
+    if(_moccache_stats
+       AND TARGET ${CMAKE_PROJECT_NAME}
+       AND CMAKE_GENERATOR MATCHES "Ninja"
+    )
+        add_custom_command(
+            TARGET ${CMAKE_PROJECT_NAME}
+            POST_BUILD
+            COMMAND "${_moccache_stats}"
+            COMMENT "moccache stats"
+            VERBATIM
+        )
     endif()
 endfunction()
 
@@ -253,7 +375,10 @@ function(qgc_set_linker)
         if(HAVE_LD_${_ld})
             cmake_pop_check_state()
             add_link_options("${_flag}")
-            set(QGC_LINKER "${_ld}" PARENT_SCOPE)
+            set(QGC_LINKER
+                "${_ld}"
+                PARENT_SCOPE
+            )
             message(STATUS "QGC: Using ${_ld} linker")
             return()
         endif()
@@ -278,7 +403,10 @@ function(qgc_enable_pie)
     check_pie_supported(OUTPUT_VARIABLE _output LANGUAGES C CXX)
 
     if(CMAKE_C_LINK_PIE_SUPPORTED AND CMAKE_CXX_LINK_PIE_SUPPORTED)
-        set(CMAKE_POSITION_INDEPENDENT_CODE ON PARENT_SCOPE)
+        set(CMAKE_POSITION_INDEPENDENT_CODE
+            ON
+            PARENT_SCOPE
+        )
         message(STATUS "QGC: PIE enabled")
     else()
         message(WARNING "QGC: PIE not supported - ${_output}")
@@ -305,7 +433,10 @@ function(qgc_enable_split_dwarf)
     if(NOT QGC_SPLIT_DWARF)
         return()
     endif()
-    if(APPLE OR MSVC OR NOT (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"))
+    if(APPLE
+       OR MSVC
+       OR NOT (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    )
         return()
     endif()
     if(CMAKE_INTERPROCEDURAL_OPTIMIZATION)
@@ -327,8 +458,14 @@ function(qgc_enable_split_dwarf)
         message(STATUS "QGC: --gdb-index skipped (needs mold/lld/gold; have '${QGC_LINKER}')")
     endif()
 
-    set(QGC_SPLIT_DWARF_ACTIVE ON PARENT_SCOPE)
-    set(QGC_SPLIT_DWARF_GDB_INDEX ${_gdb_index} PARENT_SCOPE)
+    set(QGC_SPLIT_DWARF_ACTIVE
+        ON
+        PARENT_SCOPE
+    )
+    set(QGC_SPLIT_DWARF_GDB_INDEX
+        ${_gdb_index}
+        PARENT_SCOPE
+    )
     message(STATUS "QGC: split-DWARF enabled (-gsplit-dwarf, gdb-index=${_gdb_index})")
 endfunction()
 
@@ -343,10 +480,17 @@ function(qgc_enable_ipo)
 
     if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE STREQUAL "Release")
         include(CheckIPOSupported)
-        check_ipo_supported(RESULT _result OUTPUT _output LANGUAGES C CXX)
+        check_ipo_supported(
+            RESULT _result
+            OUTPUT _output
+            LANGUAGES C CXX
+        )
 
         if(_result)
-            set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE PARENT_SCOPE)
+            set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE
+                TRUE
+                PARENT_SCOPE
+            )
             message(STATUS "QGC: IPO/LTO enabled for Release build")
         else()
             message(WARNING "QGC: IPO/LTO not supported - ${_output}")
@@ -368,29 +512,27 @@ function(qgc_require_cpm_added package_name)
 
     set(_added_variable "${package_name}_ADDED")
     if(NOT DEFINED ${_added_variable} OR NOT "${${_added_variable}}")
-        message(FATAL_ERROR
-            "QGC: ${package_name} (required dependency) was not added by CPM. "
-            "This package must be vendored from source; if QGC_USE_SYSTEM_LIBS or "
-            "QGC_SYSTEM_LIBS_ONLY resolved it via find_package(), configure without them.")
+        message(FATAL_ERROR "QGC: ${package_name} (required dependency) was not added by CPM. "
+                            "This package must be vendored from source; if QGC_USE_SYSTEM_LIBS or "
+                            "QGC_SYSTEM_LIBS_ONLY resolved it via find_package(), configure without them."
+        )
     endif()
 endfunction()
 
+# Bundle matching JSON files while keeping paths inside the source directory.
 function(qgc_add_json_resources name)
     cmake_parse_arguments(PARSE_ARGV 1 ARG "NO_RECURSE" "PREFIX;PATTERN" "")
     if(NOT name OR NOT name MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
         message(FATAL_ERROR "qgc_add_json_resources: a valid resource name is required")
     endif()
     if(ARG_KEYWORDS_MISSING_VALUES)
-        message(FATAL_ERROR
-            "qgc_add_json_resources(${name}): missing values for: ${ARG_KEYWORDS_MISSING_VALUES}")
+        message(FATAL_ERROR "qgc_add_json_resources(${name}): missing values for: ${ARG_KEYWORDS_MISSING_VALUES}")
     endif()
     if(ARG_UNPARSED_ARGUMENTS)
-        message(FATAL_ERROR
-            "qgc_add_json_resources(${name}): unknown arguments: ${ARG_UNPARSED_ARGUMENTS}")
+        message(FATAL_ERROR "qgc_add_json_resources(${name}): unknown arguments: ${ARG_UNPARSED_ARGUMENTS}")
     endif()
     if(NOT TARGET ${CMAKE_PROJECT_NAME})
-        message(FATAL_ERROR
-            "qgc_add_json_resources(${name}): project target '${CMAKE_PROJECT_NAME}' does not exist")
+        message(FATAL_ERROR "qgc_add_json_resources(${name}): project target '${CMAKE_PROJECT_NAME}' does not exist")
     endif()
     if(NOT ARG_PREFIX)
         set(ARG_PREFIX "/json")
@@ -399,18 +541,26 @@ function(qgc_add_json_resources name)
         set(ARG_PATTERN "*.json")
     endif()
     if(IS_ABSOLUTE "${ARG_PATTERN}" OR ARG_PATTERN MATCHES "(^|[/\\\\])[.][.]([/\\\\]|$)")
-        message(FATAL_ERROR
-            "qgc_add_json_resources(${name}): PATTERN must remain under the current source directory")
+        message(FATAL_ERROR "qgc_add_json_resources(${name}): PATTERN must remain under the current source directory")
     endif()
     set(_glob GLOB_RECURSE)
     if(ARG_NO_RECURSE)
         set(_glob GLOB)
     endif()
+    # Both permitted file() forms are selected immediately above.
+    # cmake-lint: disable=C0114
     file(${_glob} _json CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
-         "${CMAKE_CURRENT_SOURCE_DIR}/${ARG_PATTERN}")
+         "${CMAKE_CURRENT_SOURCE_DIR}/${ARG_PATTERN}"
+    )
     if(NOT _json)
-        message(FATAL_ERROR
-            "qgc_add_json_resources(${name}): no files matched '${ARG_PATTERN}' in ${CMAKE_CURRENT_SOURCE_DIR}")
+        message(
+            FATAL_ERROR
+                "qgc_add_json_resources(${name}): no files matched '${ARG_PATTERN}' in ${CMAKE_CURRENT_SOURCE_DIR}"
+        )
     endif()
-    qt_add_resources(${CMAKE_PROJECT_NAME} ${name} PREFIX "${ARG_PREFIX}" FILES ${_json})
+    qt_add_resources(
+        ${CMAKE_PROJECT_NAME} ${name}
+        PREFIX "${ARG_PREFIX}"
+        FILES ${_json}
+    )
 endfunction()

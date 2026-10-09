@@ -1,39 +1,46 @@
 #pragma once
 
-#include <QtCore/QChronoTimer>
-#include <QtCore/QElapsedTimer>
-#include <QtCore/QHash>
-#include <QtCore/QObject>
-#include <QtCore/QVariant>
-#include <QtCore/QVariantList>
-#include <QtQmlIntegration/QtQmlIntegration>
 #include <chrono>
 
-#include "DataRateTracker.h"
+#include <QtCore/QHash>
+#include <QtCore/QObject>
+#include <QtQmlIntegration/QtQmlIntegration>
 
+#include "DataRateTracker.h"
+#include "RTCMMessageCount.h"
+#include "ScheduledTask.h"
+
+class RuntimeScheduler;
+
+/// Statistics of the current NTRIP stream for display. Every property notifies through statsChanged(), which follows
+/// each change of the stream's lifecycle and, while it runs, every second.
 class NTRIPConnectionStats : public QObject
 {
     Q_OBJECT
     QML_ELEMENT
     QML_UNCREATABLE("")
-    Q_PROPERTY(quint64 bytesReceived READ bytesReceived NOTIFY bytesReceivedChanged)
-    Q_PROPERTY(quint32 messagesReceived READ messagesReceived NOTIFY messagesReceivedChanged)
-    Q_PROPERTY(double dataRateBytesPerSec READ dataRateBytesPerSec NOTIFY dataRateChanged)
-    Q_PROPERTY(double correctionAgeSec READ correctionAgeSec NOTIFY correctionAgeChanged)
-    Q_PROPERTY(bool dataStale READ dataStale NOTIFY dataStaleChanged)
-    /// Per-RTCM-message-ID counts since the current connection started.
-    /// Returned as a list of [id, count] pairs sorted ascending by id so the
-    /// QML Repeater can render deterministic chips without re-sorting.
-    Q_PROPERTY(QVariantList messageCountsById READ messageCountsById NOTIFY messageCountsByIdChanged)
+    Q_PROPERTY(quint64 bytesReceived READ bytesReceived NOTIFY statsChanged FINAL)
+    Q_PROPERTY(quint32 messagesReceived READ messagesReceived NOTIFY statsChanged FINAL)
+    Q_PROPERTY(double dataRateBytesPerSec READ dataRateBytesPerSec NOTIFY statsChanged FINAL)
+    Q_PROPERTY(double correctionAgeSec READ correctionAgeSec NOTIFY statsChanged FINAL)
+    Q_PROPERTY(bool dataStale READ dataStale NOTIFY statsChanged FINAL)
+    /// More than DATA_USAGE_WARNING_BYTES received, which may cost money on metered connections.
+    Q_PROPERTY(bool dataUsageHigh READ dataUsageHigh NOTIFY statsChanged FINAL)
+    /// Per-RTCM-message-ID counts since the current connection started, ascending by ID so the QML chips need no
+    /// sorting.
+    Q_PROPERTY(QList<RTCMMessageCount> messageCountsById READ messageCountsById NOTIFY statsChanged FINAL)
 
 public:
-    explicit NTRIPConnectionStats(QObject* parent = nullptr);
+    static constexpr quint64 DATA_USAGE_WARNING_BYTES = 50 * 1024 * 1024;
+
+    /// The stream counts as stale once no message has arrived for @a staleAfter.
+    explicit NTRIPConnectionStats(std::chrono::milliseconds staleAfter, QObject* parent = nullptr,
+                                  RuntimeScheduler* scheduler = nullptr);
 
     void start();
     void stop();
-    /// Record a received RTCM message. messageId = 0 is treated as "unknown/unparseable"
-    /// and tracked under a distinct bucket so it still shows up in diagnostics.
-    void recordMessage(int bytes, int messageId = 0);
+    /// Count every message; health uses the newest valid receipt on the scheduler's clock.
+    void recordMessage(int bytes, int messageId, qint64 receivedAtMs);
     void reset();
 
     quint64 bytesReceived() const { return _rateTracker.totalBytes(); }
@@ -42,31 +49,30 @@ public:
 
     double dataRateBytesPerSec() const { return _rateTracker.bytesPerSec(); }
 
-    double correctionAgeSec() const { return _lastMessageTime.isValid() ? _lastMessageTime.elapsed() / 1000.0 : -1.0; }
+    double correctionAgeSec() const;
 
     bool dataStale() const { return _dataStale; }
 
-    QVariantList messageCountsById() const;
+    bool dataUsageHigh() const { return bytesReceived() > DATA_USAGE_WARNING_BYTES; }
+
+    QList<RTCMMessageCount> messageCountsById() const;
 
 signals:
-    void bytesReceivedChanged();
-    void messagesReceivedChanged();
-    void dataRateChanged();
-    void correctionAgeChanged();
-    void dataStaleChanged();
-    void messageCountsByIdChanged();
+    void statsChanged();
 
 private:
-    static constexpr std::chrono::milliseconds kStaleThreshold{5000};
+    /// Returns whether the stale state changed.
+    bool _updateDataStale(std::chrono::milliseconds now);
+    std::chrono::milliseconds _now() const;
 
+    const std::chrono::milliseconds _staleAfter;
+    RuntimeScheduler* const _scheduler;
+    ScheduledTask _publishTask;
     DataRateTracker _rateTracker;
-    quint64 _prevBytesReceived = 0;
     quint32 _messagesReceived = 0;
-    quint32 _prevMessagesReceived = 0;
     bool _dataStale = false;
-    bool _messageCountsDirty = false;
-    QElapsedTimer _lastMessageTime;
-    QChronoTimer _rateTimer;
-    // Per-ID counts. Using int for compatibility with QVariant in QML.
+    /// Receipt times on the scheduler's clock; zero when unset.
+    std::chrono::milliseconds _lastReceivedAt{0};
+    std::chrono::milliseconds _startedAt{0};
     QHash<int, quint32> _messageCountsById;
 };

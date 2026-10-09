@@ -35,6 +35,10 @@ class QmlUITestBase : public UnitTest
 {
     Q_OBJECT
 
+public:
+    /// Searches the visual tree, including Repeater delegates and hidden items.
+    static QQuickItem* findItem(QQuickItem* root, const QString& objectName);
+
 protected slots:
 
     void cleanup() override

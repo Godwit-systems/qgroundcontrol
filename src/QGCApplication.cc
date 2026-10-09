@@ -4,7 +4,6 @@
 #include <QtCore/QFile>
 #include <QtCore/QMetaMethod>
 #include <QtCore/QMetaObject>
-#include <QtCore/QRegularExpression>
 #include <QtCore/private/qthread_p.h>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QIcon>
@@ -19,6 +18,7 @@
 #include "AudioOutput.h"
 #include "ColoredSvgImageProvider.h"
 #include "FollowMe.h"
+#include "GPSManager.h"
 #include "GraphicsSetup.h"
 #include "JoystickManager.h"
 #include "JsonParsing.h"
@@ -27,16 +27,14 @@
 #include "MAVLinkProtocol.h"
 #include "MavlinkSettings.h"
 #include "MultiVehicleManager.h"
-#include "NTRIPManager.h"
 #include "ParameterManager.h"
-#include "PositionManager.h"
 #include "QGCCommandLineParser.h"
 #include "QGCCorePlugin.h"
-#include "QGCFileDownload.h"
 #include "QGCImageProvider.h"
 #include "QGCLoggingCategory.h"
 #include "QGCLoggingCategoryManager.h"
 #include "QGCNetworkHelper.h"
+#include "QGCVersionCheck.h"
 #include "SettingsManager.h"
 #include "Vehicle.h"
 #include "VideoManager.h"
@@ -105,7 +103,7 @@ QGCApplication::QGCApplication(int& argc, char* argv[], const QGCCommandLinePars
                                << "Is writable?:" << settings.isWritable();
 
     if (!settings.isWritable()) {
-        qCWarning(QGCApplicationLog) << "Setings location is not writable";
+        qCWarning(QGCApplicationLog) << "Settings location is not writable";
     }
 
     // The setting will delete all settings on this boot
@@ -165,17 +163,13 @@ QGCApplication::QGCApplication(int& argc, char* argv[], const QGCCommandLinePars
 
     // Force old SVG Tiny 1.2 behavior for compatibility
     QSvgRenderer::setDefaultOptions(QtSvg::Tiny12FeaturesOnly);
-
-#ifndef QGC_DAILY_BUILD
-    _checkForNewVersion();
-#endif
 }
 
 void QGCApplication::setLanguage()
 {
     _locale = QLocale::system();
     qCDebug(QGCApplicationLog) << "System reported locale:" << _locale << "; Name" << _locale.name()
-                               << "; Preffered (used in maps): "
+                               << "; Preferred (used in maps): "
                                << (QLocale::system().uiLanguages().length() > 0 ? QLocale::system().uiLanguages()[0]
                                                                                 : "None");
 
@@ -303,9 +297,8 @@ void QGCApplication::_initForNormalAppBoot()
     AudioOutput::instance()->init(SettingsManager::instance()->appSettings()->audioVolume(),
                                   SettingsManager::instance()->appSettings()->audioMuted());
     FollowMe::instance()->init();
-    QGCPositionManager::instance()->init();
-    NTRIPManager::instance()->init();
     LinkManager::instance()->init();
+    GPSManager::instance()->init();
     VideoManager::instance()->init(mainRootWindow());
 
     // Set the window icon now that custom plugin has a chance to override it
@@ -351,6 +344,7 @@ void QGCApplication::_initForNormalAppBoot()
 
     // Load known link configurations
     LinkManager::instance()->loadLinkConfigurationList();
+    QGCCorePlugin::instance()->linkConfigurationsLoaded(LinkManager::instance());
 
     // Probe for joysticks
     JoystickManager::instance()->init();
@@ -363,6 +357,10 @@ void QGCApplication::_initForNormalAppBoot()
 
     // Connect links with flag AutoconnectLink
     LinkManager::instance()->startAutoConnectedLinks();
+
+#ifndef QGC_DAILY_BUILD
+    QGCVersionCheck::instance()->start();
+#endif
 }
 
 void QGCApplication::reportMissingParameter(int componentId, const QString& name)
@@ -476,35 +474,6 @@ void QGCApplication::showRebootAppMessage(const QString& message, const QString&
     showAppMessage(message, title);
 }
 
-void QGCApplication::showRebootVehicleMessage(const QString& message, const QString& title)
-{
-    if (_rebootMessageDebounced()) {
-        return;
-    }
-
-    const QString dialogTitle = title.isEmpty() ? applicationName() : title;
-
-    if (runningUnitTests()) {
-        // Same log format as showAppMessage() so tests assert this via expectAppMessage()
-        qCDebug(QGCAppMessageLog) << "showAppMessage:" << dialogTitle << "-" << message;
-        if (!_uiTestMode) {
-            return;
-        }
-    }
-
-    QObject* const rootQmlObject = _rootQmlObject();
-    if (rootQmlObject) {
-        QVariant varReturn;
-        QVariant varMessage = QVariant::fromValue(message);
-        QMetaObject::invokeMethod(rootQmlObject, "_showRebootVehicleDialog", Q_RETURN_ARG(QVariant, varReturn),
-                                  Q_ARG(QVariant, dialogTitle), Q_ARG(QVariant, varMessage));
-    } else {
-        // UI isn't ready yet: fall back to the plain app message queue
-        _delayedAppMessages.append(QPair<QString, QString>(dialogTitle, message));
-        QTimer::singleShot(200, this, &QGCApplication::_showDelayedAppMessages);
-    }
-}
-
 void QGCApplication::_showDelayedAppMessages()
 {
     if (_rootQmlObject()) {
@@ -531,74 +500,6 @@ void QGCApplication::qmlAttemptWindowClose()
     if (_rootQmlObject()) {
         QMetaObject::invokeMethod(_rootQmlObject(), "attemptWindowClose");
     }
-}
-
-void QGCApplication::_checkForNewVersion()
-{
-    if (_runningUnitTests) {
-        return;
-    }
-
-    if (!_parseVersionText(applicationVersion(), _majorVersion, _minorVersion, _buildVersion)) {
-        return;
-    }
-
-    const QString versionCheckFile = QGCCorePlugin::instance()->stableVersionCheckFileUrl();
-    if (!versionCheckFile.isEmpty()) {
-        QGCFileDownload* const download = new QGCFileDownload(this);
-        (void) connect(download, &QGCFileDownload::finished, this,
-                       &QGCApplication::_qgcCurrentStableVersionDownloadComplete);
-        if (!download->start(versionCheckFile)) {
-            qCDebug(QGCApplicationLog) << "Download QGC stable version failed to start" << download->errorString();
-            download->deleteLater();
-        }
-    }
-}
-
-void QGCApplication::_qgcCurrentStableVersionDownloadComplete(bool success, const QString& localFile,
-                                                              const QString& errorMsg)
-{
-    if (success) {
-        QFile versionFile(localFile);
-        if (versionFile.open(QIODevice::ReadOnly)) {
-            QTextStream textStream(&versionFile);
-            const QString version = textStream.readLine();
-
-            qCDebug(QGCApplicationLog) << version;
-
-            int majorVersion, minorVersion, buildVersion;
-            if (_parseVersionText(version, majorVersion, minorVersion, buildVersion)) {
-                if (_majorVersion < majorVersion ||
-                    ((_majorVersion == majorVersion) && (_minorVersion < minorVersion)) ||
-                    ((_majorVersion == majorVersion) && (_minorVersion == minorVersion) &&
-                     (_buildVersion < buildVersion))) {
-                    showAppMessage(tr("There is a newer version of %1 available. You can download it from %2.")
-                                       .arg(applicationName())
-                                       .arg(QGCCorePlugin::instance()->stableDownloadLocation()),
-                                   tr("New Version Available"));
-                }
-            }
-        }
-    } else if (!errorMsg.isEmpty()) {
-        qCDebug(QGCApplicationLog) << "Download QGC stable version failed" << errorMsg;
-    }
-
-    sender()->deleteLater();
-}
-
-bool QGCApplication::_parseVersionText(const QString& versionString, int& majorVersion, int& minorVersion,
-                                       int& buildVersion)
-{
-    static const QRegularExpression regExp("v(\\d+)\\.(\\d+)\\.(\\d+)");
-    const QRegularExpressionMatch match = regExp.match(versionString);
-    if (match.hasMatch() && match.lastCapturedIndex() == 3) {
-        majorVersion = match.captured(1).toInt();
-        minorVersion = match.captured(2).toInt();
-        buildVersion = match.captured(3).toInt();
-        return true;
-    }
-
-    return false;
 }
 
 QString QGCApplication::cachedParameterMetaDataFile()
@@ -761,6 +662,7 @@ QGCImageProvider* QGCApplication::qgcImageProvider()
 
 void QGCApplication::shutdown()
 {
+    GPSManager::instance()->shutdown();
     qCDebug(QGCApplicationLog) << "Exit";
 
     if (_videoManagerInitialized) {

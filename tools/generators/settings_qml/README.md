@@ -63,6 +63,38 @@ A page entry must have exactly one of `pageDefinition` (generated) or `url` (han
 
 ---
 
+## Custom build overlay
+
+A custom build (`QGC_CUSTOM_DIR`) can pass `--custom-pages-dir <dir>` and
+`--custom-settings-dir <dir>` (CMake does this automatically when
+`<custom>/src/AppSettings/pages` / `<custom>/src/Settings` exist):
+
+- `<custom pages dir>/SettingsPages.json` is merged into the stock page list.
+  Overlay entries support three extra keys:
+
+  | Key | Type | Description |
+  | --- | --- | --- |
+  | `insertAfter` | string | Insert the new page after the named stock page |
+  | `insertBefore` | string | Insert the new page before the named stock page |
+  | `remove` | string | Remove the named stock page (no other keys allowed) |
+
+  An overlay entry whose `name` matches an existing page replaces it in place
+  (positioning keys are not allowed on a replace).
+- `*.SettingsUI.json` files in the custom pages dir are found first, so a file
+  with the same name as a stock definition shadows it.
+- `*.SettingsGroup.json` files in the custom settings dir provide fact metadata
+  for custom groups registered at runtime via
+  `SettingsManager::registerCustomSettingsGroup` (accessor = camelCase JSON
+  stem plus `Settings`, e.g. `Custom.SettingsGroup.json` → `customSettings`).
+  A custom stem that maps to a stock `SettingsManager` accessor is rejected.
+
+`--list-outputs` prints the QML file names that would be generated (used by
+CMake to compute the output list when an overlay is active).
+
+See the `custom-example` build for a working reference.
+
+---
+
 ## `*.SettingsUI.json`
 
 Defines the layout of a single settings page.
@@ -101,6 +133,7 @@ A collapsible group with an optional heading.
 | `sectionName` | string | no | Tree-nav display name; falls back to `heading` |
 | `keywords` | array of strings | no | Extra search terms |
 | `component` | string | no | Name of a hand-written QML component to embed instead of generating controls |
+| `properties` | object | no | QML property bindings set on the `component` (same value rules as control `properties`) |
 | `missing` | array of strings | no | Descriptions of complex UI not yet generated (documentation only) |
 | `controls` | array of [Control](#control) | yes* | Controls in this group |
 
@@ -118,7 +151,8 @@ A collapsible group with an optional heading.
 | `showWhen` | string | no | Extra QML visibility expression (combined with `fact.userVisible` via logical AND) |
 | `enableWhen` | string | no | QML expression bound to `enabled` |
 | `placeholder` | string | no | Placeholder text for text fields |
-| `properties` | object | no | Extra QML property bindings for `browse`/`scaler` controls (see below) |
+| `component` | string | no | Hand-written QML component a `component` control embeds; it needs no `setting` |
+| `properties` | object | no | Extra QML property bindings for `browse`/`scaler`/`component` controls (see below) |
 | `enableCheckbox` | object | no | Enable-checkbox for sliders (see below) |
 | `button` | object | no | Adjacent button (see below) |
 
@@ -149,6 +183,7 @@ Explicit `control` values:
 | `slider` | Slider with optional enable-checkbox and adjacent button |
 | `browse` | File/path browser (desktop only; pair with `showWhen: "!ScreenTools.isMobile"`) |
 | `scaler` | Percentage scaler (for `uiScalePercent`) |
+| `component` | The hand-written QML component named by `component`, inside the group |
 
 #### `slider` extra keys
 
@@ -157,7 +192,7 @@ Explicit `control` values:
 | `enableCheckbox` | object | `{ "checked": "expr", "onClicked": "body" }` |
 | `button` | object | `{ "text": "label", "onClicked": "body", "enabled": "expr" }` |
 
-#### `browse` / `scaler` extra keys
+#### `browse` / `scaler` / `component` extra keys
 
 `properties` maps QML property names to values emitted into the control.
 Booleans and numbers map to their QML literals; strings are emitted verbatim

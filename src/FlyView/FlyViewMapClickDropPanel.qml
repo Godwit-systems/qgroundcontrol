@@ -96,10 +96,10 @@ DropPanel {
             QGCButton {
                 Layout.fillWidth: true
                 text: qsTr("Set Target Point")
-                visible: root._guidedController.showSetTargetPoint
+                visible: root._guidedController._customController.showSetTargetPoint
                 onClicked: {
                     root.close()
-                    root._guidedController.confirmAction(root._guidedController.actionSetTargetPoint, root.mapClickCoord)
+                    root._guidedController.confirmAction(root._guidedController._customController.actionSetTargetPoint, root.mapClickCoord)
                 }
             }
 

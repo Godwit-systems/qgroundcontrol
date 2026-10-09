@@ -1,40 +1,18 @@
 # ============================================================================
 # GPS Module
-# GPS/GNSS positioning and RTK support
+# GPS/GNSS positioning and RTK support. Core/ (QGCGPSCore) and NTRIP/HTTP/ (QGCNTRIPHttp) are libraries that build
+# without the application; the services in the other folders and the glue here that wires them to settings and
+# vehicles are application sources.
 # ============================================================================
 
-# RTCM + NTRIP are network/MAVLink-only — build even when QGC_NO_SERIAL_LINK skips the rest.
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core)
+add_subdirectory(Core)
+
+target_sources(${CMAKE_PROJECT_NAME} PRIVATE GPSManager.cc GPSManager.h GPSSettingsBindings.cc GPSSettingsBindings.h)
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE QGCGPSCore GPSModule)
 
-add_subdirectory(RTCM)
+add_subdirectory(Corrections)
 add_subdirectory(NTRIP)
-
-# Everything below uses QSerialPort or spawns a serial-attached GPS process.
-if(QGC_NO_SERIAL_LINK)
-    return()
-endif()
-
-add_subdirectory(Driver)
-
-target_sources(${CMAKE_PROJECT_NAME}
-    PRIVATE
-        GPSManager.cc
-        GPSManager.h
-        GPSProvider.cc
-        GPSProvider.h
-        GPSRtk.cc
-        GPSRtk.h
-        GPSRTKFactGroup.cc
-        GPSRTKFactGroup.h
-        SerialGPSTransport.cc
-        SerialGPSTransport.h
-)
-
-# ----------------------------------------------------------------------------
-# GPS/RTK Configuration Resources
-# ----------------------------------------------------------------------------
-qt_add_resources(${CMAKE_PROJECT_NAME} json_gps_drivers
-    PREFIX "/json/Vehicle"
-    FILES GPSRTKFact.json
-)
+add_subdirectory(Positioning)
+add_subdirectory(Receiver)
+add_subdirectory(Qml)

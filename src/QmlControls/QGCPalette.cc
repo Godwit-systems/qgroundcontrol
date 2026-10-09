@@ -33,6 +33,7 @@ QGCPalette::~QGCPalette()
 
 void QGCPalette::_buildMap()
 {
+    // clang-format off
     //                                      Light                 Dark
     //                                      Disabled   Enabled    Disabled   Enabled
     DECLARE_QGC_COLOR(window,               "#ffffff", "#ffffff", "#222222", "#222222")
@@ -76,8 +77,8 @@ void QGCPalette::_buildMap()
 
     // Colors not affecting by theming
     //                                                      Disabled     Enabled
-    DECLARE_QGC_NONTHEMED_COLOR(brandingPurple,             "#4A2C6D", "#4A2C6D")
-    DECLARE_QGC_NONTHEMED_COLOR(brandingBlue,               "#48D6FF", "#6045c5")
+    DECLARE_QGC_NONTHEMED_COLOR(brandPrimary,               "#4A2C6D", "#4A2C6D")
+    DECLARE_QGC_NONTHEMED_COLOR(brandAccent,                "#48D6FF", "#6045c5")
     DECLARE_QGC_NONTHEMED_COLOR(toolStripFGColor,           "#707070", "#ffffff")
     DECLARE_QGC_NONTHEMED_COLOR(photoCaptureButtonColor,    "#707070", "#ffffff")
     DECLARE_QGC_NONTHEMED_COLOR(videoCaptureButtonColor,    "#f89a9e", "#f32836")
@@ -85,10 +86,10 @@ void QGCPalette::_buildMap()
     // Colors not affecting by theming or enable/disable
     DECLARE_QGC_SINGLE_COLOR(mapWidgetBorderLight,          "#ffffff")
     DECLARE_QGC_SINGLE_COLOR(mapWidgetBorderDark,           "#000000")
-    DECLARE_QGC_SINGLE_COLOR(mapMissionTrajectory,          "#be781c")
+    DECLARE_QGC_SINGLE_COLOR(mapMissionTrajectory,          "#ffa000")
     DECLARE_QGC_SINGLE_COLOR(surveyPolygonInterior,         "green")
     DECLARE_QGC_SINGLE_COLOR(surveyPolygonTerrainCollision, "red")
-
+    // clang-format on
 }
 
 void QGCPalette::setColorGroupEnabled(bool enabled)

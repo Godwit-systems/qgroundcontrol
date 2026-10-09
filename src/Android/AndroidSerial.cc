@@ -195,6 +195,7 @@ struct JniMethodCache
     jmethodID isDeviceNameOpen = nullptr;
     jmethodID read = nullptr;
     jmethodID write = nullptr;
+    jmethodID writeWithProgress = nullptr;
     jmethodID writeAsync = nullptr;
     jmethodID setParameters = nullptr;
     jmethodID getCarrierDetect = nullptr;
@@ -202,9 +203,11 @@ struct JniMethodCache
     jmethodID getDataSetReady = nullptr;
     jmethodID getDataTerminalReady = nullptr;
     jmethodID setDataTerminalReady = nullptr;
+    jmethodID dataTerminalReadySupport = nullptr;
     jmethodID getRingIndicator = nullptr;
     jmethodID getRequestToSend = nullptr;
     jmethodID setRequestToSend = nullptr;
+    jmethodID requestToSendSupport = nullptr;
     jmethodID getControlLines = nullptr;
     jmethodID getFlowControl = nullptr;
     jmethodID setFlowControl = nullptr;
@@ -238,6 +241,7 @@ static bool cacheMethodIds(JNIEnv* env, jclass javaClass)
         {&s_methods.isDeviceNameOpen, "isDeviceNameOpen", "(Ljava/lang/String;)Z"},
         {&s_methods.read, "read", "(III)[B"},
         {&s_methods.write, "write", "(I[BII)I"},
+        {&s_methods.writeWithProgress, "writeWithProgress", "(I[BII)I"},
         {&s_methods.writeAsync, "writeAsync", "(I[BI)I"},
         {&s_methods.setParameters, "setParameters", "(IIIII)Z"},
         {&s_methods.getCarrierDetect, "getCarrierDetect", "(I)Z"},
@@ -245,9 +249,11 @@ static bool cacheMethodIds(JNIEnv* env, jclass javaClass)
         {&s_methods.getDataSetReady, "getDataSetReady", "(I)Z"},
         {&s_methods.getDataTerminalReady, "getDataTerminalReady", "(I)Z"},
         {&s_methods.setDataTerminalReady, "setDataTerminalReady", "(IZ)Z"},
+        {&s_methods.dataTerminalReadySupport, "getDataTerminalReadySupport", "(I)I"},
         {&s_methods.getRingIndicator, "getRingIndicator", "(I)Z"},
         {&s_methods.getRequestToSend, "getRequestToSend", "(I)Z"},
         {&s_methods.setRequestToSend, "setRequestToSend", "(IZ)Z"},
+        {&s_methods.requestToSendSupport, "getRequestToSendSupport", "(I)I"},
         {&s_methods.getControlLines, "getControlLines", "(I)[I"},
         {&s_methods.getFlowControl, "getFlowControl", "(I)I"},
         {&s_methods.setFlowControl, "setFlowControl", "(II)Z"},
@@ -783,6 +789,42 @@ int write(int deviceId, const char* data, int length, int timeout, bool async)
     return static_cast<int>(result);
 }
 
+int writeWithProgress(int deviceId, const char* data, int length, int timeout)
+{
+    if (!data || length <= 0) {
+        qCWarning(AndroidSerialLog) << "Invalid data or length in writeWithProgress";
+        return -1;
+    }
+
+    JniContext ctx;
+    if (!getContext(ctx, "writeWithProgress"))
+        return -1;
+
+    AndroidInterface::JniLocalRef<jbyteArray> jarray(ctx.env.jniEnv(),
+                                                     ctx.env->NewByteArray(static_cast<jsize>(length)));
+    if (!jarray.get()) {
+        qCWarning(AndroidSerialLog) << "Failed to create jbyteArray in writeWithProgress";
+        return -1;
+    }
+
+    ctx.env->SetByteArrayRegion(jarray.get(), 0, static_cast<jsize>(length), reinterpret_cast<const jbyte*>(data));
+    if (ctx.env.checkAndClearExceptions()) {
+        qCWarning(AndroidSerialLog) << "Exception occurred while setting byte array region in writeWithProgress";
+        return -1;
+    }
+
+    const jint result =
+        ctx.env->CallStaticIntMethod(ctx.cls, s_methods.writeWithProgress, static_cast<jint>(deviceId), jarray.get(),
+                                     static_cast<jint>(length), static_cast<jint>(timeout));
+
+    if (ctx.env.checkAndClearExceptions()) {
+        qCWarning(AndroidSerialLog) << "Exception occurred while calling writeWithProgress";
+        return -1;
+    }
+
+    return static_cast<int>(result);
+}
+
 // ----------------------------------------------------------------------------
 // Port configuration
 // ----------------------------------------------------------------------------
@@ -878,9 +920,36 @@ bool setDataTerminalReady(int deviceId, bool set)
     return callBoolSetMethod(s_methods.setDataTerminalReady, deviceId, set, "setDataTerminalReady");
 }
 
+int dataTerminalReadySupport(int deviceId)
+{
+    JniContext ctx;
+    if (!getContext(ctx, "getDataTerminalReadySupport"))
+        return -1;
+    jint result = -1;
+    if (!AndroidInterface::callStaticIntMethod(ctx.env, ctx.cls, s_methods.dataTerminalReadySupport,
+                                               "getDataTerminalReadySupport", AndroidSerialLog(), result, deviceId)) {
+        return -1;
+    }
+    return static_cast<int>(result);
+}
+
 bool setRequestToSend(int deviceId, bool set)
 {
     return callBoolSetMethod(s_methods.setRequestToSend, deviceId, set, "setRequestToSend");
+}
+
+int requestToSendSupport(int deviceId)
+{
+    JniContext ctx;
+    if (!getContext(ctx, "getRequestToSendSupport")) {
+        return -1;
+    }
+    jint result = -1;
+    if (!AndroidInterface::callStaticIntMethod(ctx.env, ctx.cls, s_methods.requestToSendSupport,
+                                               "getRequestToSendSupport", AndroidSerialLog(), result, deviceId)) {
+        return -1;
+    }
+    return static_cast<int>(result);
 }
 
 QSerialPort::PinoutSignals getControlLines(int deviceId)

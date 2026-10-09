@@ -1,18 +1,20 @@
 #include "RAIIFixtures.h"
 
+#include <cstring>
+#include <memory>
+
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtNetwork/QNetworkRequest>
 
 #include "AppSettings.h"
 #include "Fact.h"
+#include "MavCommandQueue.h"
 #include "QGCLoggingCategory.h"
+#include "QGCLoggingCategoryManager.h"
 #include "QGCMAVLink.h"
 #include "RunGuard.h"
 #include "SettingsManager.h"
-
-#include <cstring>
-#include <memory>
 
 QGC_LOGGING_CATEGORY(RAIIFixturesLog, "Test.RAIIFixtures")
 
@@ -225,7 +227,7 @@ bool TempFileFixture::write(const QByteArray& content)
 
     _file->seek(0);
     _file->resize(0);
-    return _file->write(content) == content.size();
+    return (_file->write(content) == content.size()) && _file->flush();
 }
 
 bool TempFileFixture::write(const QString& content)
@@ -290,6 +292,21 @@ QJsonDocument TempJsonFileFixture::readJson(QJsonParseError* error)
 }
 
 // ============================================================================
+// MavCommandAckTimeoutFixture Implementation
+// ============================================================================
+
+MavCommandAckTimeoutFixture::MavCommandAckTimeoutFixture(int timeoutMs)
+    : _previousOverride(MavCommandQueue::testAckTimeoutOverride())
+{
+    MavCommandQueue::setTestAckTimeoutOverride(timeoutMs);
+}
+
+MavCommandAckTimeoutFixture::~MavCommandAckTimeoutFixture()
+{
+    MavCommandQueue::setTestAckTimeoutOverride(_previousOverride);
+}
+
+// ============================================================================
 // TempDirFixture Implementation
 // ============================================================================
 
@@ -330,6 +347,26 @@ QString TempDirFixture::createFile(const QString& relativePath, const QByteArray
     }
 
     return fullPath;
+}
+
+// ============================================================================
+// LoggingCategoryFixture Implementation
+// ============================================================================
+
+LoggingCategoryFixture::LoggingCategoryFixture(const QString& category)
+    : _category(category)
+    , _wasEnabled(QGCLoggingCategoryManager::instance()->isCategoryEnabled(category))
+{
+    if (!_wasEnabled) {
+        QGCLoggingCategoryManager::instance()->setCategoryEnabled(_category, true);
+    }
+}
+
+LoggingCategoryFixture::~LoggingCategoryFixture()
+{
+    if (!_wasEnabled) {
+        QGCLoggingCategoryManager::instance()->setCategoryEnabled(_category, false);
+    }
 }
 
 }  // namespace TestFixtures

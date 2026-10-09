@@ -1,16 +1,15 @@
 #include "QGCNetworkHelper.h"
 
 #include <QtBluetooth/QBluetoothLocalDevice>
-#include <QtCore/QCoreApplication>
 #include <QtCore/QFile>
 #include <QtCore/QIODevice>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QUrlQuery>
+#include <QtNetwork/QHostAddress>
 #include <QtNetwork/QHttpHeaders>
 #include <QtNetwork/QHttpPart>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkInformation>
-#include <QtNetwork/QNetworkProxy>
 #include <QtNetwork/QNetworkProxyFactory>
 #include <QtNetwork/QSslSocket>
 #include <chrono>
@@ -342,6 +341,137 @@ QUrl urlWithoutQuery(const QUrl& url)
     return url.adjusted(QUrl::RemoveQuery | QUrl::RemoveFragment);
 }
 
+namespace {
+enum class HostPortClassification
+{
+    NotHostPort,
+    Valid,
+    Invalid,
+};
+
+bool isAsciiAlphaNumeric(char character)
+{
+    return ((character >= 'a') && (character <= 'z')) || ((character >= 'A') && (character <= 'Z')) ||
+           ((character >= '0') && (character <= '9'));
+}
+
+bool isValidHostname(QString hostname)
+{
+    if (hostname.endsWith(QLatin1Char('.'))) {
+        hostname.chop(1);
+    }
+
+    const QByteArray aceHostname = QUrl::toAce(hostname);
+    if (aceHostname.isEmpty() || (aceHostname.size() > 253)) {
+        return false;
+    }
+
+    const QList<QByteArray> labels = aceHostname.split('.');
+    for (const QByteArray& label : labels) {
+        if (label.isEmpty() || (label.size() > 63) || !isAsciiAlphaNumeric(label.front()) ||
+            !isAsciiAlphaNumeric(label.back())) {
+            return false;
+        }
+        for (const char character : label) {
+            if (!isAsciiAlphaNumeric(character) && (character != '-')) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+HostPortClassification classifyHostPort(const QString& value)
+{
+    if (value.contains(QStringLiteral("://"))) {
+        return HostPortClassification::NotHostPort;
+    }
+
+    const qsizetype separator = value.lastIndexOf(QLatin1Char(':'));
+    if ((separator <= 0) || (separator == (value.size() - 1))) {
+        return HostPortClassification::NotHostPort;
+    }
+
+    const QString portText = value.sliced(separator + 1);
+    for (const QChar character : portText) {
+        if (!character.isDigit()) {
+            return HostPortClassification::NotHostPort;
+        }
+    }
+
+    bool portOk = false;
+    const int port = portText.toInt(&portOk);
+    if (!portOk || (port < 1) || (port > 65535)) {
+        return HostPortClassification::Invalid;
+    }
+
+    const QUrl authority(QStringLiteral("qgc://") + value, QUrl::StrictMode);
+    if (!authority.isValid() || authority.host().isEmpty() || !authority.userInfo().isEmpty() ||
+        !authority.path().isEmpty() || authority.hasQuery() || authority.hasFragment() ||
+        (authority.port(-1) != port)) {
+        return HostPortClassification::Invalid;
+    }
+
+    QHostAddress address;
+    const bool validHost = address.setAddress(authority.host()) || isValidHostname(authority.host());
+    return validHost ? HostPortClassification::Valid : HostPortClassification::Invalid;
+}
+}  // namespace
+
+QString redactedUrlForLogging(const QUrl& url)
+{
+    if (url.isEmpty()) {
+        return QStringLiteral("<empty-url>");
+    }
+
+    const QString sourceText = url.isValid() ? url.toString(QUrl::FullyEncoded) : url.path();
+    const HostPortClassification hostPort = classifyHostPort(sourceText);
+    if (hostPort == HostPortClassification::Valid) {
+        return sourceText;
+    }
+    if (hostPort == HostPortClassification::Invalid) {
+        return QStringLiteral("<invalid-url length=%1>").arg(sourceText.size());
+    }
+    if (!url.isValid()) {
+        return QStringLiteral("<invalid-url>");
+    }
+
+    QUrl redactedUrl = url.adjusted(QUrl::RemoveUserInfo);
+    if (redactedUrl.hasQuery()) {
+        const auto queryItems = QUrlQuery(redactedUrl).queryItems(QUrl::FullyDecoded);
+        QUrlQuery redactedQuery;
+        for (const auto& queryItem : queryItems) {
+            redactedQuery.addQueryItem(queryItem.first, QStringLiteral("REDACTED"));
+        }
+        if (queryItems.isEmpty()) {
+            redactedUrl.setQuery(QString());
+        } else {
+            redactedUrl.setQuery(redactedQuery);
+        }
+    }
+    if (redactedUrl.hasFragment()) {
+        redactedUrl.setFragment(QStringLiteral("REDACTED"));
+    }
+
+    return redactedUrl.toDisplayString(QUrl::FullyEncoded);
+}
+
+QString redactedUrlForLogging(const QString& url)
+{
+    const HostPortClassification hostPort = classifyHostPort(url);
+    if (hostPort == HostPortClassification::Valid) {
+        return url;
+    }
+    if (hostPort == HostPortClassification::Invalid) {
+        return QStringLiteral("<invalid-url length=%1>").arg(url.size());
+    }
+    const QUrl parsedUrl(url);
+    if (!url.isEmpty() && !parsedUrl.isValid()) {
+        return QStringLiteral("<invalid-url length=%1>").arg(url.size());
+    }
+    return redactedUrlForLogging(parsedUrl);
+}
+
 // ============================================================================
 // Request Configuration
 // ============================================================================
@@ -439,47 +569,6 @@ void setFormHeaders(QNetworkRequest& request)
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
 }
 
-QString defaultUserAgent()
-{
-    static QString userAgent;
-    if (userAgent.isEmpty()) {
-        userAgent = QStringLiteral("%1/%2 (Qt %3)")
-                        .arg(QCoreApplication::applicationName())
-                        .arg(QCoreApplication::applicationVersion())
-                        .arg(QString::fromLatin1(qVersion()));
-    }
-    return userAgent;
-}
-
-// ============================================================================
-// Authentication Helpers
-// ============================================================================
-
-void setBasicAuth(QNetworkRequest& request, const QString& credentials)
-{
-    QHttpHeaders headers = request.headers();
-    headers.replaceOrAppend(QHttpHeaders::WellKnownHeader::Authorization, "Basic " + credentials);
-    request.setHeaders(headers);
-}
-
-void setBasicAuth(QNetworkRequest& request, const QString& username, const QString& password)
-{
-    setBasicAuth(request, createBasicAuthCredentials(username, password));
-}
-
-void setBearerToken(QNetworkRequest& request, const QString& token)
-{
-    QHttpHeaders headers = request.headers();
-    headers.replaceOrAppend(QHttpHeaders::WellKnownHeader::Authorization, "Bearer " + token);
-    request.setHeaders(headers);
-}
-
-QString createBasicAuthCredentials(const QString& username, const QString& password)
-{
-    const QString credentials = username + QLatin1Char(':') + password;
-    return QString::fromLatin1(credentials.toUtf8().toBase64());
-}
-
 // ============================================================================
 // Multipart Form Data Helpers
 // ============================================================================
@@ -510,13 +599,6 @@ QHttpPart createFilePart(const QString& name, const QString& fileName, QIODevice
 // ============================================================================
 // SSL/TLS Configuration Builders
 // ============================================================================
-
-QSslConfiguration createSslConfig(QSsl::SslProtocol protocol)
-{
-    QSslConfiguration config = QSslConfiguration::defaultConfiguration();
-    config.setProtocol(protocol);
-    return config;
-}
 
 QSslConfiguration createInsecureSslConfig()
 {
@@ -732,59 +814,33 @@ bool isJsonResponse(const QNetworkReply* reply)
 // Network Availability
 // ============================================================================
 
-bool isNetworkAvailable()
+QNetworkInformation* networkInformation()
 {
     if (!QNetworkInformation::loadDefaultBackend()) {
         qCDebug(QGCNetworkHelperLog) << "Failed to load network information backend";
-        return true;  // Assume available if we can't check
     }
-
-    const QNetworkInformation* netInfo = QNetworkInformation::instance();
-    if (netInfo == nullptr) {
-        return true;
+    if (!QNetworkInformation::loadBackendByFeatures(QNetworkInformation::Feature::Reachability)) {
+        qCDebug(QGCNetworkHelperLog) << "Network information backend does not provide reachability";
     }
+    return QNetworkInformation::instance();
+}
 
-    return netInfo->reachability() != QNetworkInformation::Reachability::Disconnected;
+bool isNetworkAvailable()
+{
+    const QNetworkInformation* netInfo = networkInformation();
+    return !netInfo || netInfo->reachability() != QNetworkInformation::Reachability::Disconnected;
 }
 
 bool isInternetAvailable()
 {
-    if (QNetworkInformation::availableBackends().isEmpty()) {
-        return false;
-    }
-
-    if (!QNetworkInformation::loadDefaultBackend()) {
-        return false;
-    }
-
-    if (!QNetworkInformation::loadBackendByFeatures(QNetworkInformation::Feature::Reachability)) {
-        return false;
-    }
-
-    const QNetworkInformation* netInfo = QNetworkInformation::instance();
-    if (netInfo == nullptr) {
-        return false;
-    }
-
-    return netInfo->reachability() == QNetworkInformation::Reachability::Online;
+    const QNetworkInformation* netInfo = networkInformation();
+    return netInfo && netInfo->reachability() == QNetworkInformation::Reachability::Online;
 }
 
 bool isNetworkEthernet()
 {
-    if (QNetworkInformation::availableBackends().isEmpty()) {
-        return false;
-    }
-
-    if (!QNetworkInformation::loadDefaultBackend()) {
-        return false;
-    }
-
-    const QNetworkInformation* netInfo = QNetworkInformation::instance();
-    if (netInfo == nullptr) {
-        return false;
-    }
-
-    return netInfo->transportMedium() == QNetworkInformation::TransportMedium::Ethernet;
+    const QNetworkInformation* netInfo = networkInformation();
+    return netInfo && netInfo->transportMedium() == QNetworkInformation::TransportMedium::Ethernet;
 }
 
 bool isBluetoothAvailable()
@@ -795,11 +851,7 @@ bool isBluetoothAvailable()
 
 ConnectionType connectionType()
 {
-    if (!QNetworkInformation::loadDefaultBackend()) {
-        return ConnectionType::Unknown;
-    }
-
-    const QNetworkInformation* netInfo = QNetworkInformation::instance();
+    const QNetworkInformation* netInfo = networkInformation();
     if (!netInfo) {
         return ConnectionType::Unknown;
     }
@@ -894,26 +946,6 @@ QString sslVersion()
 void initializeProxySupport()
 {
     QNetworkProxyFactory::setUseSystemConfiguration(true);
-}
-
-QNetworkAccessManager* createNetworkManager(QObject* parent)
-{
-    auto* manager = new QNetworkAccessManager(parent);
-    configureProxy(manager);
-    return manager;
-}
-
-void configureProxy(QNetworkAccessManager* manager)
-{
-    if (!manager) {
-        return;
-    }
-
-#if !defined(Q_OS_IOS) && !defined(Q_OS_ANDROID)
-    QNetworkProxy proxy = manager->proxy();
-    proxy.setType(QNetworkProxy::DefaultProxy);
-    manager->setProxy(proxy);
-#endif
 }
 
 }  // namespace QGCNetworkHelper

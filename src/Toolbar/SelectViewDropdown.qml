@@ -45,21 +45,6 @@ ToolIndicatorPage {
             }
 
             SubMenuButton {
-                objectName: "toolbar_viewGeoTest"
-                implicitHeight: root._toolButtonHeight
-                Layout.fillWidth: true
-                text: "GeoMap Test"   // debug-only developer tool: not translated
-                imageResource: "/InstrumentValueIcons/globe.svg"
-                visible: ScreenTools.isDebug
-                onClicked: {
-                    if (mainWindow.allowViewSwitch()) {
-                        mainWindow.closeIndicatorDrawer()
-                        mainWindow.showGeoTestView()
-                    }
-                }
-            }
-
-            SubMenuButton {
                 objectName: "toolbar_viewAnalyze"
                 implicitHeight: root._toolButtonHeight
                 Layout.fillWidth: true
@@ -128,6 +113,24 @@ ToolIndicatorPage {
                 Layout.fillWidth: true
                 Layout.columnSpan: 2
                 spacing: 0
+
+                QGCButton {
+                    objectName: "toolbar_updateButton"
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.bottomMargin: ScreenTools.defaultFontPixelHeight / 2
+                    implicitHeight: contentItem.implicitHeight + topPadding + bottomPadding
+                    heightFactor: 0.2
+                    leftPadding: ScreenTools.defaultFontPixelWidth
+                    rightPadding: leftPadding
+                    text: qsTr("Update")
+                    primary: true
+                    pointSize: ScreenTools.smallFontPointSize
+                    visible: QGroundControl.newStableVersion !== ""
+                    onClicked: {
+                        mainWindow.closeIndicatorDrawer()
+                        Qt.openUrlExternally(QGroundControl.corePlugin.stableDownloadUrl)
+                    }
+                }
 
                 QGCLabel {
                     id: versionLabel

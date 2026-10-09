@@ -1,9 +1,9 @@
 #pragma once
 
-#include <QtCore/QObject>
-#include <QtQmlIntegration/QtQmlIntegration>
 #include <QtCore/QJsonObject>
 #include <QtCore/QMap>
+#include <QtQml/QQmlPropertyMap>
+#include <QtQmlIntegration/QtQmlIntegration>
 
 class ADSBVehicleManagerSettings;
 class APMMavlinkStreamRateSettings;
@@ -23,6 +23,7 @@ class RemoteIDSettings;
 class RTKSettings;
 class UnitsSettings;
 class NTRIPSettings;
+class GPSCorrectionSettings;
 class VideoSettings;
 class Viewer3DSettings;
 class MavlinkSettings;
@@ -30,10 +31,11 @@ class FactMetaData;
 class JoystickManagerSettings;
 class LogManagerSettings;
 class LogViewerSettings;
+class SettingsGroup;
 
 /// \brief Provides access to all app settings
 ///
-class SettingsManager : public QObject
+class SettingsManager : public QQmlPropertyMap
 {
     Q_OBJECT
     QML_ELEMENT
@@ -56,6 +58,7 @@ class SettingsManager : public QObject
     Q_MOC_INCLUDE("RTKSettings.h")
     Q_MOC_INCLUDE("UnitsSettings.h")
     Q_MOC_INCLUDE("NTRIPSettings.h")
+    Q_MOC_INCLUDE("GPSCorrectionSettings.h")
     Q_MOC_INCLUDE("VideoSettings.h")
     Q_MOC_INCLUDE("MavlinkSettings.h")
     Q_MOC_INCLUDE("JoystickManagerSettings.h")
@@ -80,6 +83,7 @@ class SettingsManager : public QObject
     Q_PROPERTY(QObject *rtkSettings                     READ rtkSettings                    CONSTANT)
     Q_PROPERTY(QObject *unitsSettings                   READ unitsSettings                  CONSTANT)
     Q_PROPERTY(QObject *ntripSettings                   READ ntripSettings                  CONSTANT)
+    Q_PROPERTY(QObject* gpsCorrectionSettings READ gpsCorrectionSettings CONSTANT)
     Q_PROPERTY(QObject *videoSettings                   READ videoSettings                  CONSTANT)
     Q_PROPERTY(QObject *mavlinkSettings                 READ mavlinkSettings                CONSTANT)
     Q_PROPERTY(QObject *joystickManagerSettings         READ joystickManagerSettings        CONSTANT)
@@ -100,6 +104,14 @@ public:
     ///     @param userVisible - true: Setting should be visible in ui, false: Setting should not be shown in ui (default value will be used as value)
     static void adjustSettingMetaData(const QString &settingsGroup, FactMetaData &metaData, bool &userVisible);
 
+    /// Registers a custom build settings group so QML can access it as
+    /// QGroundControl.settingsManager.<accessorName>. Called from a
+    /// QGCCorePlugin::registerCustomSettings override. The accessor name must be the
+    /// camelCase form of the group's SettingsGroup.json stem plus "Settings"
+    /// (e.g. Custom.SettingsGroup.json -> "customSettings") so the generated settings
+    /// pages resolve to the same name. Takes ownership of the group; a rejected group is deleted.
+    void registerCustomSettingsGroup(const QString &accessorName, SettingsGroup *group);
+
     ADSBVehicleManagerSettings *adsbVehicleManagerSettings() const;
     APMMavlinkStreamRateSettings *apmMavlinkStreamRateSettings() const;
     AppSettings *appSettings() const;
@@ -118,6 +130,7 @@ public:
     RTKSettings *rtkSettings() const;
     UnitsSettings *unitsSettings() const;
     NTRIPSettings *ntripSettings() const;
+    GPSCorrectionSettings* gpsCorrectionSettings() const;
     VideoSettings *videoSettings() const;
     MavlinkSettings *mavlinkSettings() const;
     JoystickManagerSettings *joystickManagerSettings() const;
@@ -146,6 +159,7 @@ private:
     RTKSettings *_rtkSettings = nullptr;
     UnitsSettings *_unitsSettings = nullptr;
     NTRIPSettings *_ntripSettings = nullptr;
+    GPSCorrectionSettings* _gpsCorrectionSettings = nullptr;
     VideoSettings *_videoSettings = nullptr;
     MavlinkSettings *_mavlinkSettings = nullptr;
     JoystickManagerSettings *_joystickManagerSettings = nullptr;

@@ -85,9 +85,11 @@ static QMap<int, QString> px4_board_name_map {
     {1110, "jfb_jfb110_default"},
     {1200, "jfb_jfb200_default"},
     {1209, "gearup_airbrainh743_default"},
+    {1218, "amovlab_flycore_default"},
     {1198, "aedrox_aedroxh7_default"},
     {1123, "siyi_n7_default"},
     {1124, "3dr_ctrl-zero-h7-oem-revg_default"},
+    {1949, "agam_fmu-v6xrt_default"},
     {5600, "zeroone_x6_default"},
     {6110, "svehicle_e2_default"},
     {7000, "cuav_7-nano_default"},
@@ -326,7 +328,7 @@ void FirmwareUpgradeController::_foundBoardInfo(int bootloaderVersion, int board
 ///         machine to the appropriate error state.
 void FirmwareUpgradeController::_bootloaderSyncFailed(void)
 {
-    _errorCancel("Unable to sync with bootloader.");
+    _errorCancel(tr("Unable to sync with bootloader."));
 }
 
 QHash<FirmwareUpgradeController::FirmwareIdentifier, QString>* FirmwareUpgradeController::_firmwareHashForBoardId(int boardId)
@@ -336,13 +338,13 @@ QHash<FirmwareUpgradeController::FirmwareIdentifier, QString>* FirmwareUpgradeCo
     switch (boardId) {
     case Bootloader::boardIDSiKRadio1000:
     {
-        FirmwareToUrlElement_t element = { SiKRadio, StableFirmware, DefaultVehicleFirmware, "http://px4-travis.s3.amazonaws.com/SiK/stable/radio~hm_trp.ihx" };
+        FirmwareToUrlElement_t element = { SiKRadio, StableFirmware, DefaultVehicleFirmware, "https://firmware.ardupilot.org/SiK/stable/radio~hm_trp.ihx" };
         _rgFirmwareDynamic.insert(FirmwareIdentifier(element.stackType, element.firmwareType, element.vehicleType), element.url);
     }
         break;
     case Bootloader::boardIDSiKRadio1060:
     {
-        FirmwareToUrlElement_t element = { SiKRadio, StableFirmware, DefaultVehicleFirmware, "https://px4-travis.s3.amazonaws.com/SiK/stable/radio~hb1060.ihx" };
+        FirmwareToUrlElement_t element = { SiKRadio, StableFirmware, DefaultVehicleFirmware, "https://firmware.ardupilot.org/SiK/stable/radio~hb1060.ihx" };
         _rgFirmwareDynamic.insert(FirmwareIdentifier(element.stackType, element.firmwareType, element.vehicleType), element.url);
     }
         break;
@@ -493,7 +495,7 @@ void FirmwareUpgradeController::_error(const QString& errorString)
     delete _image;
     _image = nullptr;
 
-    _errorCancel(QString("Error: %1").arg(errorString));
+    _errorCancel(tr("Error: %1").arg(errorString));
 }
 
 void FirmwareUpgradeController::_status(const QString& statusString)

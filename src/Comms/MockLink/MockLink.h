@@ -10,8 +10,10 @@
 #include "MockLinkMissionItemHandler.h"
 
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QList>
 #include <QtCore/QMap>
 #include <QtCore/QMutex>
+#include <QtCore/QPair>
 #include <QtCore/QSet>
 #include <QtPositioning/QGeoCoordinate>
 
@@ -29,6 +31,7 @@ class MockLink : public LinkInterface
 {
     Q_OBJECT
     friend class MockLinkFTP;
+    friend class StandardModesTest;
 
 public:
     explicit MockLink(SharedLinkConfigurationPtr &config, QObject *parent = nullptr);
@@ -54,6 +57,9 @@ public:
     double vehicleLongitude() const { return _vehicleLongitude; }
     double vehicleAltitudeAMSL() const { return _vehicleAltitudeAMSL; }
 
+    /// Configured home position, before the per-vehicle offset applied to the vehicle position
+    QGeoCoordinate homeCoordinate() const { return _homeCoordinate; }
+
     bool signingEnabled() const { return _signingEnabled; }
 
     /// Sends the specified mavlink message to QGC
@@ -67,6 +73,12 @@ public:
     void setCalibrationPose(MockLinkPX4Calibration::Pose pose) const { _mockLinkPX4Calibration->setPose(pose); }
 
     MockLinkFTP *mockLinkFTP() const;
+    MockLinkGimbal *mockLinkGimbal() const { return _mockLinkGimbal; }
+
+    /// Test API: pins the simulated vehicle attitude (degrees) in place of the default sinusoid.
+    /// Heading reported by Vehicle::heading() is truncated to whole degrees, so pass integral yaw.
+    void setVehicleAttitudeOverrideDeg(float rollDeg, float pitchDeg, float yawDeg);
+    void clearVehicleAttitudeOverride();
 
     /// Set the armed state of the simulated vehicle
     void setArmed(bool armed) { if (armed) _mavBaseMode |= MAV_MODE_FLAG_SAFETY_ARMED; else _mavBaseMode &= ~MAV_MODE_FLAG_SAFETY_ARMED; }
@@ -118,6 +130,13 @@ public:
     }
     int receivedMissionRequestListCount(MAV_MISSION_TYPE type) const { return _missionItemHandler->requestListCount(type); }
 
+    /// Unit test support: bumps the AVAILABLE_MODES_MONITOR sequence number, which unlocks the
+    /// delayed flight mode and causes QGC to re-query standard modes.
+    void bumpAvailableModesMonitorSequence() { ++_availableModesMonitorSeqNumber; }
+
+    /// Unit test support: sends every vehicle->QGC message twice, as when two links receive the same traffic.
+    void setDuplicateResponses(bool duplicate) { _duplicateResponses = duplicate; }
+
     enum RequestMessageFailureMode_t {
         FailRequestMessageNone,
         FailRequestMessageCommandAcceptedMsgNotSent,
@@ -168,6 +187,8 @@ public:
 
     /// Returns the number of standalone PARAM_REQUEST_READ requests for _HASH_CHECK received
     int hashCheckRequestCount() const { return _hashCheckRequestCount; }
+    /// Index-based PARAM_REQUEST_READs received, in arrival order: (componentId, paramIndex)
+    QList<QPair<int, int>> paramRequestReadIndexLog() const { return _paramRequestReadIndexLog; }
 
     /// Change a float parameter value directly on MockLink (for testing cache invalidation)
     void setMockParamValue(int componentId, const QString &paramName, float value);
@@ -197,6 +218,8 @@ public:
     void setRemoteIDArmStatus(uint8_t status, const QString& error);
 
     static MockLink *startPX4MockLink(MockConfiguration::Options options = MockConfiguration::OptionNone, MockConfiguration::FailureMode_t failureMode = MockConfiguration::FailNone, MockConfiguration::VideoStreamType videoStreamType = MockConfiguration::VideoStreamNone);
+    /// Starts a MockLink from a fully caller-configured MockConfiguration (ownership transfers to LinkManager)
+    static MockLink *startMockLink(MockConfiguration *mockConfig) { return _startMockLink(mockConfig); }
     static MockLink *startPX4MockLinkWithMission(MockConfiguration::Options options = MockConfiguration::OptionNone, MockConfiguration::FailureMode_t failureMode = MockConfiguration::FailNone);
     static MockLink *startGenericMockLink(MockConfiguration::Options options = MockConfiguration::OptionNone, MockConfiguration::FailureMode_t failureMode = MockConfiguration::FailNone, MockConfiguration::VideoStreamType videoStreamType = MockConfiguration::VideoStreamNone);
     static MockLink *startNoInitialConnectMockLink(MockConfiguration::Options options = MockConfiguration::OptionNone, MockConfiguration::FailureMode_t failureMode = MockConfiguration::FailNone);
@@ -271,6 +294,9 @@ private:
     void _handleParamRequestList(const mavlink_message_t &msg);
     void _handleParamSet(const mavlink_message_t &msg);
     void _handleParamRequestRead(const mavlink_message_t &msg);
+    bool _shouldSkipParamSend(int componentId, const QString &paramName, int paramIndex) const;
+    bool _shouldSkipParamRead(int componentId, const QString &paramName, int paramIndex);
+    bool _hasNonDefaultParamComponent() const;
     void _handleFTP(const mavlink_message_t &msg);
     void _handleCommandLong(const mavlink_message_t &msg);
     void _handleCommandInt(const mavlink_message_t &msg);
@@ -349,10 +375,16 @@ private:
     const bool _enableCamera = false;
     const bool _enableGimbal = false;
     const bool _enableProximity = false;
+    const bool _enableADSB = _mockConfig->enableADSB();
     const MockConfiguration::FailureMode_t _failureMode = MockConfiguration::FailNone;
     const bool _stayMavlinkV1 = false;  ///< Test-only: never upgrade outgoing traffic to MAVLink v2
     const bool _ftpCapability = false;  ///< Test-only: advertise MAV_PROTOCOL_CAPABILITY_FTP
+    const bool _sendRadioStatusEnabled = true; ///< Stream RADIO_STATUS at 1Hz (marks the link as a radio link)
     const uint8_t _vehicleSystemId = 0;
+    const QGeoCoordinate _homeCoordinate = MockConfiguration::homeCoordinate(_mockConfig->homeLocationEnum());
+    const double _defaultVehicleLatitude = _homeCoordinate.latitude();
+    const double _defaultVehicleLongitude = _homeCoordinate.longitude();
+    const double _defaultVehicleHomeAltitude = _homeCoordinate.altitude();
     const double _vehicleLatitude = 0.0;
     const double _vehicleLongitude = 0.0;
     // These are just set for reporting the fields in _respondWithAutopilotVersion()
@@ -365,6 +397,16 @@ private:
     MockLinkGimbal *const _mockLinkGimbal = nullptr;
     MockLinkPX4Calibration *const _mockLinkPX4Calibration = nullptr;
     MockLinkFTP *const _mockLinkFTP = nullptr;
+
+    // Written by test thread, read by worker thread in _sendAttitudeQuaternion; one lock so a frame never mixes old and new angles
+    struct AttitudeOverride {
+        bool enabled = false;
+        float rollRad = 0.0f;
+        float pitchRad = 0.0f;
+        float yawRad = 0.0f;
+    };
+    mutable QMutex _attitudeOverrideMutex;
+    AttitudeOverride _attitudeOverride;
 
     const MockConfiguration::VideoStreamType _requestedVideoStreamType = MockConfiguration::VideoStreamNone;
     MockVideoStreamServer *_videoStreamServer = nullptr;
@@ -387,7 +429,6 @@ private:
 
     uint8_t _mavBaseMode = MAV_MODE_FLAG_MANUAL_INPUT_ENABLED | MAV_MODE_FLAG_CUSTOM_MODE_ENABLED;
     uint32_t _mavCustomMode = PX4CustomMode::MANUAL;
-    uint8_t _mavState = MAV_STATE_STANDBY;
 
     QElapsedTimer _runningTime;
     static constexpr int kTestParamRequestListBatch = 25;
@@ -401,6 +442,7 @@ private:
 
     double _vehicleAltitudeAMSL = _defaultVehicleHomeAltitude;
     std::atomic<bool> _commLost = false;
+    std::atomic<bool> _duplicateResponses = false;
     bool _mavlinkV2Upgraded = false;    ///< True once outgoing traffic has switched from v1 to v2
     bool _signingEnabled = false;
     bool _highLatencyTransmissionEnabled = true;
@@ -418,12 +460,14 @@ private:
     QMutex _paramRequestListMutex;
 
     // Mavlink standard modes worker information
-    int _availableModesWorkerNextModeIndex = 0;         ///< 0: not active, +index: next mode the send in sequence, -index: send a single mode (indices are 1-based)
+    int _availableModesWorkerNextModeIndex = 0;  ///< 0: inactive; otherwise the next one-based streaming index
     /// Protects _availableModesWorkerNextModeIndex from check-then-set and read-modify-write races:
-    ///   - Main thread: _handleRequestMessageAvailableModes() checking/starting/stopping worker
+    ///   - Main thread: _handleRequestMessageAvailableModes() checking/starting a stream
     ///   - Worker thread: _availableModesWorker() incrementing index every 2ms (500Hz)
     QMutex _availableModesWorkerMutex;
-    uint8_t _availableModesMonitorSeqNumber = 0;        ///< Sequence number for the next available mode message to send
+    /// Sequence number sent in AVAILABLE_MODES_MONITOR. Written from the test (main) thread via
+    /// bumpAvailableModesMonitorSequence, read from the worker thread at 1Hz/500Hz.
+    std::atomic<uint8_t> _availableModesMonitorSeqNumber = 0;
 
     QString _logDownloadFilename;                       ///< Filename for log download which is in progress
     bool _logsErased = false;                           ///< Set by LOG_ERASE, LOG_REQUEST_LIST reports no logs
@@ -445,6 +489,7 @@ private:
     bool _paramRequestReadFailureFirstAttemptPending = false;
     bool _hashCheckNoResponse = false;
     int _hashCheckRequestCount = 0;
+    QList<QPair<int, int>> _paramRequestReadIndexLog;
     bool _paramRequestListHashCheckSent = false;
     bool _resetSysAutostartOnParamReset = false;
 
@@ -508,22 +553,16 @@ private:
 
     static std::atomic<int> _nextVehicleSystemId;
 
-#ifdef QGC_MOCKLINK_TERRAIN_TEST_HOME
-    // Alternate vehicle location which is a good spot for testing varying terrain
-    static constexpr double _defaultVehicleLatitude = 47.6305111;
-    static constexpr double _defaultVehicleLongitude = -122.0863806;
-    static constexpr double _defaultVehicleHomeAltitude = 9.26;
-#else
-    // Vehicle position is set close to default Gazebo vehicle location. This allows for multi-vehicle
-    // testing of a gazebo vehicle and a mocklink vehicle
-    static constexpr double _defaultVehicleLatitude = 47.397;
-    static constexpr double _defaultVehicleLongitude = 8.5455;
-    static constexpr double _defaultVehicleHomeAltitude = 488.056;
-#endif
-
     static constexpr const char *_failParam = "COM_FLTMODE6";
 
     static constexpr uint8_t _vehicleComponentId = MAV_COMP_ID_AUTOPILOT1;
+
+    // Simulated DroneCAN node exposed as its own param component (FailMissingParamOnAllRequestsNonDefaultComponent and friends)
+    static constexpr uint8_t _nonDefaultParamComponentId = 125;
+    static constexpr const char *_nonDefaultFailParam = "BATT_MONITOR";
+    static constexpr int _sharedFailParamIndex = 1;         ///< FailMissingParamSharedIndexAcrossComponents: index missing on both components
+    static constexpr int _nonDefaultStreamedParamCount = 2; ///< FailNonDefaultComponentDead/Lossy: params that make it through the stream
+    QSet<QPair<int, int>> _nonDefaultReadAttempted;         ///< FailNonDefaultComponentLossy: (component, index) reads already dropped once
 
     static constexpr uint16_t _logDownloadLogId = 0;        ///< Id of siumulated log file
     static constexpr uint32_t _logDownloadFileSize = 1000;  ///< Size of simulated log file
@@ -541,6 +580,13 @@ private:
     };
 
     static QList<FlightMode_t> _availableFlightModes;
+    static QList<FlightMode_t> _apmCopterAvailableFlightModes;
+    static QList<FlightMode_t> _apmPlaneAvailableFlightModes;
+    static QList<FlightMode_t> _apmRoverAvailableFlightModes;
+    static QList<FlightMode_t> _apmSubAvailableFlightModes;
+
+    /// Returns the flight mode list appropriate for the simulated firmware/vehicle type
+    const QList<FlightMode_t> &_flightModeList() const;
 
     std::atomic<bool> _disconnectedEmitted{false};
 };

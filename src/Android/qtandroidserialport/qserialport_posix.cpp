@@ -106,10 +106,10 @@ bool QSerialPortPrivate::_posixOpen(QIODevice::OpenMode mode)
     descriptor = ::open(systemLocation.toLocal8Bit().constData(), flags);
     if (descriptor == -1) {
         qCWarning(AndroidSerialPortLog) << "Error opening" << systemLocation << ":" << strerror(errno);
-        const QSerialPort::SerialPortError error = (errno == ENOENT)   ? QSerialPort::DeviceNotFoundError
-                                                   : (errno == EACCES) ? QSerialPort::PermissionError
-                                                                       : QSerialPort::OpenError;
-        setError(QSerialPortErrorInfo(error, QString::fromLocal8Bit(strerror(errno))));
+        const QSerialPort::SerialPortError openError = (errno == ENOENT)   ? QSerialPort::DeviceNotFoundError
+                                                       : (errno == EACCES) ? QSerialPort::PermissionError
+                                                                           : QSerialPort::OpenError;
+        setError(QSerialPortErrorInfo(openError, QString::fromLocal8Bit(strerror(errno))));
         return false;
     }
 
@@ -225,6 +225,40 @@ qint64 QSerialPortPrivate::_posixWrite(const char* data, qint64 maxSize, int tim
         if (deadline.hasExpired()) {
             qCWarning(AndroidSerialPortLog) << "Write timeout on" << systemLocation;
             return -1;
+        }
+
+        struct pollfd pfd = {descriptor, POLLOUT, 0};
+        const int pollTimeout = deadline.isForever() ? -1 : static_cast<int>(qMax<qint64>(0, deadline.remainingTime()));
+        (void) ::poll(&pfd, 1, pollTimeout);
+    }
+
+    return totalWritten;
+}
+
+qint64 QSerialPortPrivate::_posixWriteWithProgress(const char* data, qint64 maxSize, int timeoutMs)
+{
+    qint64 totalWritten = 0;
+    // Match the USB backend: zero waits without limit.
+    const QDeadlineTimer deadline =
+        timeoutMs == 0 ? QDeadlineTimer(QDeadlineTimer::Forever) : QDeadlineTimer(timeoutMs);
+
+    while (totalWritten < maxSize) {
+        const ssize_t written = ::write(descriptor, data + totalWritten, static_cast<size_t>(maxSize - totalWritten));
+        if (written > 0) {
+            totalWritten += written;
+            continue;
+        }
+
+        if ((written < 0) && (errno != EAGAIN) && (errno != EWOULDBLOCK) && (errno != EINTR)) {
+            qCWarning(AndroidSerialPortLog) << "Write error on" << systemLocation << ":" << strerror(errno);
+            // Report bytes already sent; the next write reports the error.
+            return totalWritten > 0 ? totalWritten : -1;
+        }
+
+        if (deadline.hasExpired()) {
+            // A short count is a timeout, not an error.
+            qCDebug(AndroidSerialPortLog) << "Write timeout on" << systemLocation << "after" << totalWritten << "bytes";
+            return totalWritten;
         }
 
         struct pollfd pfd = {descriptor, POLLOUT, 0};
@@ -406,8 +440,11 @@ static bool setControlLine(int descriptor, int line, bool set)
 bool QSerialPortPrivate::_posixSetDataTerminalReady(bool set)
 {
     if (!setControlLine(descriptor, TIOCM_DTR, set)) {
-        qCWarning(AndroidSerialPortLog) << "Failed to set DTR on" << systemLocation << ":" << strerror(errno);
-        setError(QSerialPortErrorInfo(QSerialPort::UnknownError, QSerialPort::tr("Failed to set DTR")));
+        const int dtrError = errno;
+        const auto code = dtrError == ENOTTY || dtrError == EOPNOTSUPP ? QSerialPort::UnsupportedOperationError
+                                                                       : QSerialPort::UnknownError;
+        qCDebug(AndroidSerialPortLog) << "Failed to set DTR on" << systemLocation << ":" << strerror(dtrError);
+        setError(QSerialPortErrorInfo(code, QSerialPort::tr("Failed to set DTR")));
         return false;
     }
 
@@ -417,8 +454,11 @@ bool QSerialPortPrivate::_posixSetDataTerminalReady(bool set)
 bool QSerialPortPrivate::_posixSetRequestToSend(bool set)
 {
     if (!setControlLine(descriptor, TIOCM_RTS, set)) {
-        qCWarning(AndroidSerialPortLog) << "Failed to set RTS on" << systemLocation << ":" << strerror(errno);
-        setError(QSerialPortErrorInfo(QSerialPort::UnknownError, QSerialPort::tr("Failed to set RTS")));
+        const int rtsError = errno;
+        const auto code = rtsError == ENOTTY || rtsError == EOPNOTSUPP ? QSerialPort::UnsupportedOperationError
+                                                                       : QSerialPort::UnknownError;
+        qCDebug(AndroidSerialPortLog) << "Failed to set RTS on" << systemLocation << ":" << strerror(rtsError);
+        setError(QSerialPortErrorInfo(code, QSerialPort::tr("Failed to set RTS")));
         return false;
     }
 

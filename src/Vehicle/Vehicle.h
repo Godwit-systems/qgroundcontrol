@@ -41,9 +41,7 @@ class VehicleDistanceSensorFactGroup;
 class VehicleEFIFactGroup;
 class VehicleEstimatorStatusFactGroup;
 class VehicleGeneratorFactGroup;
-class VehicleGPS2FactGroup;
 class VehicleGPSFactGroup;
-class VehicleGPSAggregateFactGroup;
 class VehicleHygrometerFactGroup;
 class VehicleLocalPositionFactGroup;
 class VehicleLocalPositionSetpointFactGroup;
@@ -102,7 +100,7 @@ class Vehicle : public VehicleFactGroup, public VehicleTypes
     Q_MOC_INCLUDE("VehicleLinkManager.h")
     Q_MOC_INCLUDE("VehicleObjectAvoidance.h")
     Q_MOC_INCLUDE("VehicleSupports.h")
-    
+    Q_MOC_INCLUDE("VehicleGPSFactGroup.h")
 
     friend class InitialConnectStateMachine;
     friend class VehicleLinkManager;
@@ -149,7 +147,7 @@ public:
     Q_PROPERTY(QGeoCoordinate       homePosition                READ homePosition                                                   NOTIFY homePositionChanged)
     Q_PROPERTY(QGeoCoordinate       armedPosition               READ armedPosition                                                  NOTIFY armedPositionChanged)
     Q_PROPERTY(QGeoCoordinate       targetPointCoordinate       READ targetPointCoordinate      WRITE setTargetPointCoordinate      NOTIFY targetPointCoordinateChanged)
-    Q_PROPERTY(bool                 targetPointSet              READ targetPointSet                                                 NOTIFY targetPointCoordinateChanged)   
+    Q_PROPERTY(bool                 targetPointSet              READ targetPointSet                                                 NOTIFY targetPointCoordinateChanged)
     Q_PROPERTY(bool                 armed                       READ armed                      WRITE setArmedShowError             NOTIFY armedChanged)
     Q_PROPERTY(bool                 autoDisarm                  READ autoDisarm                                                     NOTIFY autoDisarmChanged)
     Q_PROPERTY(bool                 flightModeSetAvailable      READ flightModeSetAvailable                                         CONSTANT)
@@ -214,6 +212,9 @@ public:
     Q_PROPERTY(QObject*             sysStatusSensorInfo         READ sysStatusSensorInfo                                            CONSTANT)
     Q_PROPERTY(bool                 allSensorsHealthy           READ allSensorsHealthy                                              NOTIFY allSensorsHealthyChanged)    //< true: all sensors in SYS_STATUS reported as healthy
     Q_PROPERTY(bool                 requiresGpsFix              READ requiresGpsFix                                                 NOTIFY requiresGpsFixChanged)
+    Q_PROPERTY(bool                 rebootRequired              READ rebootRequired                                                 NOTIFY rebootRequiredChanged)
+    Q_PROPERTY(QString              newStableFirmwareVersion    READ newStableFirmwareVersion                                       NOTIFY newStableFirmwareVersionChanged) ///< Non-empty when vehicle firmware is older than this stable version
+    Q_PROPERTY(bool                 newStableFirmwareVersionAcknowledged READ newStableFirmwareVersionAcknowledged                  NOTIFY newStableFirmwareVersionChanged)
     Q_PROPERTY(double               loadProgress                READ loadProgress                                                   NOTIFY loadProgressChanged)
     Q_PROPERTY(bool                 initialConnectComplete      READ isInitialConnectComplete                                       NOTIFY initialConnectComplete)
 
@@ -222,7 +223,9 @@ public:
     Q_PROPERTY(QGCMapCircle*    orbitMapCircle  READ orbitMapCircle     CONSTANT)
 
     // Vehicle state used for guided control
-    Q_PROPERTY(bool     flying                  READ flying                                         NOTIFY flyingChanged)       ///< Vehicle is flying
+    Q_PROPERTY(bool underway READ underway NOTIFY underwayChanged)  ///< Vehicle is flying, driving or diving
+    Q_PROPERTY(
+        bool airborne READ airborne NOTIFY airborneChanged)  ///< Vehicle is underway and is not a rover/boat or sub
     Q_PROPERTY(bool     landing                 READ landing                                        NOTIFY landingChanged)      ///< Vehicle is in landing pattern (DO_LAND_START)
     Q_PROPERTY(bool     guidedMode              READ guidedMode                 WRITE setGuidedMode NOTIFY guidedModeChanged)   ///< Vehicle is in Guided mode and can respond to guided commands
     Q_PROPERTY(QString  gotoFlightMode          READ gotoFlightMode                                 CONSTANT)                   ///< Flight mode vehicle is in while performing goto
@@ -238,9 +241,8 @@ public:
     // FactGroup object model properties
 
     Q_PROPERTY(FactGroup*           vehicle         READ vehicleFactGroup           CONSTANT)
-    Q_PROPERTY(FactGroup*           gps             READ gpsFactGroup               CONSTANT)
-    Q_PROPERTY(FactGroup*           gps2            READ gps2FactGroup              CONSTANT)
-    Q_PROPERTY(FactGroup*           gpsAggregate    READ gpsAggregateFactGroup      CONSTANT)
+    Q_PROPERTY(VehicleGPSFactGroup* gps READ gpsFactGroup CONSTANT)
+    Q_PROPERTY(VehicleGPSFactGroup* gps2 READ gps2FactGroup CONSTANT)
     Q_PROPERTY(FactGroup*           wind            READ windFactGroup              CONSTANT)
     Q_PROPERTY(FactGroup*           vibration       READ vibrationFactGroup         CONSTANT)
     Q_PROPERTY(FactGroup*           temperature     READ temperatureFactGroup       CONSTANT)
@@ -360,6 +362,14 @@ public:
     /// Reboot vehicle
     Q_INVOKABLE void rebootVehicle();
 
+    /// Latches rebootRequired until the vehicle reboots
+    void setRebootRequired();
+
+    void setNewStableFirmwareVersion(const QString& version);
+
+    /// Hides the update indicator until a newer stable firmware is released
+    Q_INVOKABLE void acknowledgeNewStableFirmwareVersion();
+
     Q_INVOKABLE void sendPlan(QString planFile);
     Q_INVOKABLE void setEstimatorOrigin(const QGeoCoordinate& centerCoord);
 
@@ -406,18 +416,17 @@ public:
 
     Q_INVOKABLE QVariant expandedToolbarIndicatorSource(const QString& indicatorName);
 
+    Q_INVOKABLE void doSetTargetPoint(QGeoCoordinate targetCoordinate);
+    void setTargetPointCoordinate(const QGeoCoordinate& coordinate);
     Q_INVOKABLE void clearTargetPoint() { setTargetPointCoordinate(QGeoCoordinate()); }
-
     Q_INVOKABLE bool sendTargetRelative(
         double forwardMeters,
         double rightMeters,
         double downMeters,
-        const QVariantList &posStd,
+        const QVariantList& posStd,
         double yawStd,
-        const QVariantList &qTarget,
-        const QVariantList &qSensor);
-
-
+        const QVariantList& qTarget,
+        const QVariantList& qSensor);
 
     bool    isInitialConnectComplete() const;
     QString gotoFlightMode          () const;
@@ -431,6 +440,8 @@ public:
 
     QGeoCoordinate coordinate() { return _coordinate; }
     QGeoCoordinate armedPosition    () { return _armedPosition; }
+    QGeoCoordinate targetPointCoordinate() const { return _targetPointCoordinate; }
+    bool targetPointSet() const { return _targetPointCoordinate.isValid(); }
 
     qreal getInitialGCSPressure() const { return _initialGCSPressure; }
     qreal getInitialGCSTemperature() const { return _initialGCSTemperature; }
@@ -520,7 +531,11 @@ public:
     uint            messagesReceived            () const{ return _messagesReceived; }
     uint            messagesSent                () const{ return _messagesSent; }
     uint            messagesLost                () const{ return _messagesLost; }
-    bool            flying                      () const { return _flying; }
+
+    bool underway() const { return _underway; }
+
+    bool airborne() const { return _airborne; }
+
     bool            landing                     () const { return _landing; }
     bool            guidedMode                  () const;
     bool            inFwdFlight                 () const;
@@ -556,6 +571,9 @@ public:
     bool            allSensorsHealthy           () const{ return _allSensorsHealthy; }
     QObject*        sysStatusSensorInfo         ();
     bool            requiresGpsFix              () const { return static_cast<bool>(_onboardControlSensorsPresent & MAV_SYS_STATUS_SENSOR_GPS); }
+    bool            rebootRequired              () const { return _rebootRequired; }
+    QString         newStableFirmwareVersion    () const { return _newStableFirmwareVersion; }
+    bool            newStableFirmwareVersionAcknowledged() const { return _newStableFirmwareVersionAcknowledged; }
     bool            hilMode                     () const { return _base_mode & MAV_MODE_FLAG_HIL_ENABLED; }
     Actuators*      actuators                   () const { return _actuators; }
     VehicleSigningController* signingController() { return _signingController; }
@@ -564,10 +582,10 @@ public:
     void startCalibration   (QGCMAVLink::CalibrationType calType);
     void stopCalibration    (bool showError);
 
-    FactGroup* vehicleFactGroup             () { return _vehicleFactGroup; }
-    FactGroup* gpsFactGroup                 ();
-    FactGroup* gps2FactGroup                ();
-    FactGroup* gpsAggregateFactGroup        ();
+    FactGroup* vehicleFactGroup() { return _vehicleFactGroup; }
+
+    VehicleGPSFactGroup* gpsFactGroup();
+    VehicleGPSFactGroup* gps2FactGroup();
     FactGroup* windFactGroup                ();
     FactGroup* vibrationFactGroup           ();
     FactGroup* temperatureFactGroup         ();
@@ -732,7 +750,7 @@ public:
 
     void forceInitialPlanRequestComplete();
 
-    void _setFlying(bool flying);
+    void _setUnderway(bool underway);
     void _setLanding(bool landing);
     void _setHomePosition(QGeoCoordinate& homeCoord);
 
@@ -772,9 +790,11 @@ signals:
     void mavlinkMessageReceived         (const mavlink_message_t& message);
     void homePositionChanged            (const QGeoCoordinate& homePosition);
     void armedPositionChanged();
+    void targetPointCoordinateChanged(QGeoCoordinate targetPointCoordinate);
     void armedChanged                   (bool armed);
     void flightModeChanged              (const QString& flightMode);
-    void flyingChanged                  (bool flying);
+    void underwayChanged(bool underway);
+    void airborneChanged(bool airborne);
     void landingChanged                 (bool landing);
     void guidedModeChanged              (bool guidedMode);
     void inFwdFlightChanged             ();
@@ -804,6 +824,8 @@ signals:
     void readyToFlyChanged              (bool readyToFy);
     void allSensorsHealthyChanged       (bool allSensorsHealthy);
     void requiresGpsFixChanged          ();
+    void rebootRequiredChanged          ();
+    void newStableFirmwareVersionChanged();
     void haveMRSpeedLimChanged          ();
     void haveFWSpeedLimChanged          ();
     void hasGripperChanged              ();
@@ -858,6 +880,7 @@ private slots:
     void _parametersReady                   (bool parametersReady);
     void _handleFlightModeChanged           (const QString& flightMode);
     void _announceArmedChanged              (bool armed);
+    void _updateAirborne();
     void _offlineCruiseSpeedSettingChanged  (QVariant value);
     void _offlineHoverSpeedSettingChanged   (QVariant value);
     void _prearmErrorTimeout                ();
@@ -913,6 +936,8 @@ private:
     void _commonInit                    (LinkInterface* link);
     void _setupAutoDisarmSignalling     ();
     void _setCapabilities               (uint64_t capabilityBits);
+    QString _acknowledgedStableFirmwareSettingsKey() const;
+    bool _isNewStableFirmwareVersionAcknowledged() const;
     void _updateArmed                   (bool armed);
     bool _apmArmingNotRequired          ();
     void _initializeCsv                 ();
@@ -952,12 +977,13 @@ private:
     QGeoCoordinate  _coordinate;
     QGeoCoordinate  _homePosition;
     QGeoCoordinate  _armedPosition;
-    
+    QGeoCoordinate  _targetPointCoordinate;
 
     qreal           _initialGCSPressure = 0.;
     qreal           _initialGCSTemperature = 0.;
 
-    bool            _flying = false;
+    bool _underway = false;
+    bool _airborne = false;
     bool            _landing = false;
     bool            _vtolInFwdFlight = false;
     uint32_t        _onboardControlSensorsPresent = 0;
@@ -976,6 +1002,9 @@ private:
     bool            _readyToFlyAvailable                    = false;
     bool            _readyToFly                             = false;
     bool            _allSensorsHealthy                      = true;
+    bool            _rebootRequired                         = false;
+    QString         _newStableFirmwareVersion;
+    bool            _newStableFirmwareVersionAcknowledged   = false;
     VehicleSigningController* _signingController            = nullptr;
     std::atomic<bool> _joystickAuxRcOverrideActive           = false;
 
@@ -1074,12 +1103,6 @@ private:
     RequestMessageCoordinator*  _reqMsgCoord    = nullptr;
 
 public:
-    /// Ack timeout used in unit tests — kept on Vehicle for source-compat with
-    /// existing tests (mirrors MavCommandQueue::kTestAckTimeoutMs).
-    static constexpr int _mavCommandMaxRetryCount    = 3;
-    static constexpr int kTestMavCommandAckTimeoutMs = 500;
-    static constexpr int kTestMavCommandMaxWaitMs    = kTestMavCommandAckTimeoutMs * _mavCommandMaxRetryCount * 2;
-
     /// Test-only helper: forwards to MavCommandQueue::findEntryIndex.
     int  _findMavCommandListEntryIndex(int targetCompId, MAV_CMD command);
 
@@ -1096,7 +1119,6 @@ public:
     const QString _vehicleFactGroupName =            QStringLiteral("vehicle");
     const QString _gpsFactGroupName =                QStringLiteral("gps");
     const QString _gps2FactGroupName =               QStringLiteral("gps2");
-    const QString _gpsAggregateFactGroupName =       QStringLiteral("gpsAggregate");
     const QString _windFactGroupName =               QStringLiteral("wind");
     const QString _vibrationFactGroupName =          QStringLiteral("vibration");
     const QString _temperatureFactGroupName =        QStringLiteral("temperature");
@@ -1115,8 +1137,7 @@ public:
 
     VehicleFactGroup*               _vehicleFactGroup;
     VehicleGPSFactGroup*                _gpsFactGroup               = nullptr;
-    VehicleGPS2FactGroup*               _gps2FactGroup              = nullptr;
-    VehicleGPSAggregateFactGroup*       _gpsAggregateFactGroup      = nullptr;
+    VehicleGPSFactGroup* _gps2FactGroup = nullptr;
     VehicleWindFactGroup*               _windFactGroup              = nullptr;
     VehicleVibrationFactGroup*          _vibrationFactGroup         = nullptr;
     VehicleTemperatureFactGroup*        _temperatureFactGroup       = nullptr;
@@ -1165,23 +1186,6 @@ signals:
 
 private:
     MessageIntervalManager* _messageIntervalManager = nullptr;
-private:
-    QGeoCoordinate _targetPointCoordinate;
-
-
-/*---------------------------------------------------------------------------*/
-/*===========================================================================*/
-/*                         set Target point                                  */
-/*===========================================================================*/
-public:
-    QGeoCoordinate targetPointCoordinate() const { return _targetPointCoordinate; }
-    bool            targetPointSet()       const { return _targetPointCoordinate.isValid(); }
-
-    Q_INVOKABLE void doSetTargetPoint(QGeoCoordinate targetCoordinate);
-    void setTargetPointCoordinate(const QGeoCoordinate& coordinate);
-
-signals:
-    void targetPointCoordinateChanged(QGeoCoordinate targetPointCoordinate);
 
 /*---------------------------------------------------------------------------*/
 /*===========================================================================*/
@@ -1241,25 +1245,15 @@ signals:
 /*                         STATUS TEXT HANDLER                               */
 /*===========================================================================*/
 private:
-    Q_PROPERTY(bool    messageTypeNone    READ messageTypeNone    NOTIFY messageTypeChanged)
-    Q_PROPERTY(bool    messageTypeNormal  READ messageTypeNormal  NOTIFY messageTypeChanged)
-    Q_PROPERTY(bool    messageTypeWarning READ messageTypeWarning NOTIFY messageTypeChanged)
-    Q_PROPERTY(bool    messageTypeError   READ messageTypeError   NOTIFY messageTypeChanged)
-    Q_PROPERTY(int     messageCount       READ messageCount       NOTIFY messageCountChanged)
-    Q_PROPERTY(QString formattedMessages  READ formattedMessages  NOTIFY formattedMessagesChanged)
+    Q_PROPERTY(int criticalMessageCount READ criticalMessageCount NOTIFY criticalMessageCountChanged)
+    Q_PROPERTY(QString formattedMessages READ formattedMessages NOTIFY formattedMessagesChanged)
 
     // Q_PROPERTY(StatusTextHandler *statusTextHandler READ statusTextHandler NOTIFY statusTextHandlerChanged)
 
 public:
-    Q_INVOKABLE void resetAllMessages();
-    Q_INVOKABLE void resetErrorLevelMessages();
     Q_INVOKABLE void clearMessages();
 
-    bool messageTypeNone() const;
-    bool messageTypeNormal() const;
-    bool messageTypeWarning() const;
-    bool messageTypeError() const;
-    int messageCount() const;
+    int criticalMessageCount() const;
     QString formattedMessages() const;
 
     // StatusTextHandler* statusTextHandler() { return m_statusTextHandler; }
@@ -1270,8 +1264,7 @@ signals:
     void messagesReceivedChanged();
     void messagesSentChanged();
     void messagesLostChanged();
-    void messageTypeChanged();
-    void messageCountChanged();
+    void criticalMessageCountChanged();
     void formattedMessagesChanged();
     void newFormattedMessage(QString formattedMessage);
 

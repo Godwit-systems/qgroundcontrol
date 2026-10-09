@@ -24,13 +24,13 @@ CorridorScanComplexItem::CorridorScanComplexItem(PlanMasterController* masterCon
         _cameraCalc.distanceToSurface()->setRawValue(SettingsManager::instance()->appSettings()->defaultMissionItemAltitude()->rawValue());
     }
 
-    connect(&_corridorWidthFact,    &Fact::valueChanged,                            this, &CorridorScanComplexItem::_setDirty);
+    connect(&_corridorWidthFact,    &Fact::rawValueChanged,                         this, &CorridorScanComplexItem::_setDirty);
     connect(&_corridorPolyline,     &QGCMapPolyline::pathChanged,                   this, &CorridorScanComplexItem::_setDirty);
 
     connect(&_corridorPolyline,     &QGCMapPolyline::dirtyChanged,                  this, &CorridorScanComplexItem::_polylineDirtyChanged);
 
     connect(&_corridorPolyline,     &QGCMapPolyline::pathChanged,                   this, &CorridorScanComplexItem::_rebuildCorridorPolygon);
-    connect(&_corridorWidthFact,    &Fact::valueChanged,                            this, &CorridorScanComplexItem::_rebuildCorridorPolygon);
+    connect(&_corridorWidthFact,    &Fact::rawValueChanged,                         this, &CorridorScanComplexItem::_rebuildCorridorPolygon);
 
     connect(&_corridorPolyline,     &QGCMapPolyline::countChanged,                  this, &CorridorScanComplexItem::_updateSpecifiesCoordinate);
 
@@ -82,7 +82,7 @@ void CorridorScanComplexItem::loadPreset(const QString& presetName)
 
     QJsonObject presetObject = _loadPresetJson(presetName);
     if (!_loadWorker(presetObject, 0, errorString, true /* forPresets */)) {
-        QGC::showAppMessage(QStringLiteral("Internal Error: Preset load failed. Name: %1 Error: %2").arg(presetName).arg(errorString));
+        QGC::showAppMessage(tr("Internal Error: Preset load failed. Name: %1 Error: %2").arg(presetName).arg(errorString));
     }
     _rebuildTransects();
 }

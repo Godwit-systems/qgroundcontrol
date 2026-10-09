@@ -11,10 +11,10 @@ retry_script = load_script_module("setup/run_with_retry.py", "run_with_retry")
 
 
 def test_main_forwards_command_and_retry_limits() -> None:
-    command = ["python", "-m", "pip", "install", "fastcrc"]
+    command = ["uv", "sync", "--frozen", "--project", "tools"]
     with patch.object(
         retry_script,
-        "run_checked_with_retry",
+        "run_with_retry",
         return_value=subprocess.CompletedProcess(command, 0),
     ) as run:
         result = retry_script.main(
@@ -36,7 +36,7 @@ def test_main_returns_final_command_failure() -> None:
     command = ["false"]
     with patch.object(
         retry_script,
-        "run_checked_with_retry",
+        "run_with_retry",
         side_effect=subprocess.CalledProcessError(7, command),
     ):
         assert retry_script.main(["--", *command]) == 7

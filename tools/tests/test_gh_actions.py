@@ -1,16 +1,79 @@
-#!/usr/bin/env python3
 """Tests for tools/common/gh_actions.py."""
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import common.gh_actions as mod
 import pytest
 
 from ._helpers import completed
+
+
+def test_gh_uses_text_safe_subprocess_wrapper() -> None:
+    result = subprocess.CompletedProcess(["gh", "api", "rate_limit"], 0, "{}", "")
+    with patch.object(mod, "run_captured", return_value=result) as run:
+        assert mod.gh("api", "rate_limit") is result
+    run.assert_called_once_with(["gh", "api", "rate_limit"], check=True, timeout=None)
+
+
+def test_gh_read_retry_recovers_from_transient_server_error() -> None:
+    command = ["gh", "api", "rate_limit"]
+    failure = subprocess.CalledProcessError(1, command, stderr="gh: HTTP 502: Bad Gateway")
+    success = subprocess.CompletedProcess(command, 0, "{}", "")
+    with (
+        patch("common.proc.subprocess.run", side_effect=[failure, success]) as run,
+        patch("common.proc.time.sleep"),
+    ):
+        result = mod.gh("api", "rate_limit", retry_transient=True, max_attempts=2)
+    assert result.stdout == "{}"
+    assert run.call_count == 2
+
+
+def test_gh_read_retry_exhausts_rate_limit_failures() -> None:
+    command = ["gh", "api", "rate_limit"]
+    failure = subprocess.CalledProcessError(
+        1,
+        command,
+        stderr="gh: API rate limit exceeded (HTTP 429)",
+    )
+    with (
+        patch("common.proc.subprocess.run", side_effect=failure) as run,
+        patch("common.proc.time.sleep"),
+        pytest.raises(subprocess.CalledProcessError),
+    ):
+        mod.gh("api", "rate_limit", retry_transient=True, max_attempts=3)
+    assert run.call_count == 3
+
+
+def test_gh_does_not_retry_mutation_by_default() -> None:
+    failure = subprocess.CompletedProcess(["gh"], 1, "", "HTTP 503")
+    with patch.object(mod, "run_captured", return_value=failure) as run:
+        result = mod.gh("api", "repos/owner/repo/issues/1", "-X", "PATCH", check=False)
+    assert result is failure
+    run.assert_called_once()
+
+
+def test_gh_rejects_retry_for_mutation() -> None:
+    with (
+        patch.object(mod, "run_with_retry") as run,
+        pytest.raises(ValueError, match="read-only"),
+    ):
+        mod.gh("api", "repos/owner/repo/issues/1", "-X", "PATCH", retry_transient=True)
+    run.assert_not_called()
+
+
+def test_gh_rejects_retry_for_non_api_command() -> None:
+    with (
+        patch.object(mod, "run_with_retry") as run,
+        pytest.raises(ValueError, match="read-only"),
+    ):
+        mod.gh("workflow", "run", "build.yml", retry_transient=True)
+    run.assert_not_called()
 
 
 def test_list_workflow_runs_for_sha_uses_jq_get_method() -> None:
@@ -23,6 +86,7 @@ def test_list_workflow_runs_for_sha_uses_jq_get_method() -> None:
     assert "--method" in called_args
     assert "GET" in called_args
     assert ".workflow_runs[]?" in called_args
+    assert gh_mock.call_args.kwargs["retry_transient"] is True
 
 
 def test_list_workflow_runs_for_sha_unpacks_ndjson_stream() -> None:
@@ -48,6 +112,7 @@ def test_list_run_artifacts_parses_ndjson_stream() -> None:
     assert [a["name"] for a in artifacts] == ["QGroundControl", "QGroundControl2"]
     called_args = gh_mock.call_args[0]
     assert ".artifacts[]?" in called_args
+    assert gh_mock.call_args.kwargs["retry_transient"] is True
     gh_mock.assert_called_once()
 
 
@@ -115,12 +180,12 @@ class TestResolveCachePolicy:
     def test_auto_same_repo_pr(self) -> None:
         env = {"EVENT_NAME": "pull_request", "PR_REPO": "owner/repo", "THIS_REPO": "owner/repo"}
         with patch.dict(os.environ, env, clear=False):
-            assert mod.resolve_cache_policy("auto") == "false"
+            assert mod.resolve_cache_policy("auto") == "true"
 
     def test_auto_fork_pr(self) -> None:
         env = {"EVENT_NAME": "pull_request", "PR_REPO": "fork/repo", "THIS_REPO": "owner/repo"}
         with patch.dict(os.environ, env, clear=False):
-            assert mod.resolve_cache_policy("auto") == "false"
+            assert mod.resolve_cache_policy("auto") == "true"
 
     def test_auto_pull_request_target(self) -> None:
         env = {
@@ -138,6 +203,24 @@ class TestResolveCachePolicy:
     def test_auto_workflow_dispatch(self) -> None:
         with patch.dict(os.environ, {"EVENT_NAME": "workflow_dispatch"}, clear=False):
             assert mod.resolve_cache_policy("auto") == "true"
+
+
+@pytest.mark.parametrize("cache_dir", [".ccache", ".cache/moccache", ".cache/CPM", ".qt"])
+def test_cache_path_survives_runner_workspace_changes(monkeypatch, tmp_path, cache_dir):
+    paths = []
+    for root in ("actions-runner/_work/qgc/qgc", "a/qgc/qgc"):
+        workspace = tmp_path / root
+        monkeypatch.setenv("GITHUB_WORKSPACE", str(workspace))
+        paths.append(mod.github_cache_path(workspace / cache_dir))
+        assert mod.github_cache_path(Path(cache_dir)) == cache_dir
+    assert paths == [cache_dir, cache_dir]
+
+
+def test_external_cache_path_is_not_relocated(monkeypatch, tmp_path):
+    monkeypatch.setenv("GITHUB_WORKSPACE", str(tmp_path / "workspace"))
+    external = tmp_path / "sdk"
+    assert mod.github_cache_path(external) == external.as_posix()
+    assert mod.github_cache_path(Path("../sdk")) == external.as_posix()
 
 
 class TestWriteGithubOutput:

@@ -2,6 +2,7 @@
 
 #include <QtCore/QPointF>
 #include <QtCore/QTimer>
+#include <QtCore/QVariantMap>
 #include <QtPositioning/QGeoCoordinate>
 #include <QtQml/QJSValue>
 #include <QtQmlIntegration/QtQmlIntegration>
@@ -9,31 +10,29 @@
 #include "QmlUnitsConversion.h"
 
 class ADSBVehicleManager;
-class FactGroup;
+class GPSManager;
 class LinkManager;
 class MAVLinkSigningKeys;
 class MissionCommandTree;
 class MultiVehicleManager;
+class PositionManager;
 class QGCCorePlugin;
 class QGCMapEngineManager;
-class NTRIPManager;
 class QGCPalette;
-class QGCPositionManager;
 class SettingsManager;
 class VideoManager;
 class QmlObjectListModel;
 
 Q_MOC_INCLUDE("ADSBVehicleManager.h")
-Q_MOC_INCLUDE("NTRIPManager.h")
-Q_MOC_INCLUDE("FactGroup.h")
+Q_MOC_INCLUDE("GPSManager.h")
 Q_MOC_INCLUDE("LinkManager.h")
 Q_MOC_INCLUDE("MAVLinkSigningKeys.h")
 Q_MOC_INCLUDE("MissionCommandTree.h")
 Q_MOC_INCLUDE("MultiVehicleManager.h")
+Q_MOC_INCLUDE("PositionManager.h")
 Q_MOC_INCLUDE("QGCCorePlugin.h")
 Q_MOC_INCLUDE("QGCMapEngineManager.h")
 Q_MOC_INCLUDE("QGCPalette.h")
-Q_MOC_INCLUDE("PositionManager.h")
 Q_MOC_INCLUDE("SettingsManager.h")
 Q_MOC_INCLUDE("VideoManager.h")
 
@@ -61,19 +60,17 @@ public:
 
     Q_PROPERTY(QString              appName                 READ    appName                 CONSTANT)
     Q_PROPERTY(LinkManager*         linkManager             READ    linkManager             CONSTANT)
+    Q_PROPERTY(QObject* serialPortManager READ serialPortManager CONSTANT)
     Q_PROPERTY(MultiVehicleManager* multiVehicleManager     READ    multiVehicleManager     CONSTANT)
     Q_PROPERTY(QGCMapEngineManager* mapEngineManager        READ    mapEngineManager        CONSTANT)
-    Q_PROPERTY(QGCPositionManager*  qgcPositionManger       READ    qgcPositionManger       CONSTANT)
+    Q_PROPERTY(PositionManager* positionManager READ positionManager CONSTANT)
     Q_PROPERTY(VideoManager*        videoManager            READ    videoManager            CONSTANT)
     Q_PROPERTY(SettingsManager*     settingsManager         READ    settingsManager         CONSTANT)
     Q_PROPERTY(ADSBVehicleManager*  adsbVehicleManager      READ    adsbVehicleManager      CONSTANT)
-    Q_PROPERTY(NTRIPManager*        ntripManager            READ    ntripManager            CONSTANT)
     Q_PROPERTY(QGCCorePlugin*       corePlugin              READ    corePlugin              CONSTANT)
     Q_PROPERTY(MissionCommandTree*  missionCommandTree      READ    missionCommandTree      CONSTANT)
     Q_PROPERTY(MAVLinkSigningKeys*   mavlinkSigningKeys      READ    mavlinkSigningKeys      CONSTANT)
-#ifndef QGC_NO_SERIAL_LINK
-    Q_PROPERTY(FactGroup*           gpsRtk                  READ    gpsRtkFactGroup         CONSTANT)
-#endif
+    Q_PROPERTY(GPSManager* gpsManager READ gpsManager CONSTANT)
     Q_PROPERTY(QGCPalette*          globalPalette           MEMBER  _globalPalette          CONSTANT)   ///< This palette will always return enabled colors
     Q_PROPERTY(QmlUnitsConversion*  unitsConversion         READ    unitsConversion         CONSTANT)
     Q_PROPERTY(bool                 singleFirmwareSupport   READ    singleFirmwareSupport   CONSTANT)
@@ -90,6 +87,7 @@ public:
     Q_PROPERTY(QString qgcVersion       READ qgcVersion         CONSTANT)
     Q_PROPERTY(QString qgcAppDate       READ qgcAppDate         CONSTANT)
     Q_PROPERTY(bool    qgcDailyBuild    READ qgcDailyBuild      CONSTANT)
+    Q_PROPERTY(QString newStableVersion READ newStableVersion NOTIFY newStableVersionChanged)
 
     Q_PROPERTY(qreal zOrderTopMost              READ zOrderTopMost              CONSTANT) ///< z order for top most items, toolbar, main window sub view
     Q_PROPERTY(qreal zOrderWidgets              READ zOrderWidgets              CONSTANT) ///< z order value to widgets, for example: zoom controls, hud widgetss
@@ -110,17 +108,14 @@ public:
     Q_INVOKABLE void    saveBoolGlobalSetting   (const QString& key, bool value);
     Q_INVOKABLE bool    loadBoolGlobalSetting   (const QString& key, bool defaultValue);
 
-
-
-    Q_INVOKABLE void    startPX4MockLink            (bool sendStatusText, bool enableCamera, bool enableGimbal, bool enableProximity = false, int videoStreamType = 0);
-    Q_INVOKABLE void    startGenericMockLink        (bool sendStatusText, bool enableCamera, bool enableGimbal, bool enableProximity = false, int videoStreamType = 0);
-    Q_INVOKABLE void    startAPMArduCopterMockLink  (bool sendStatusText, bool enableCamera, bool enableGimbal, bool enableProximity = false, bool apmStartFreshParams = false, int videoStreamType = 0);
-    Q_INVOKABLE void    startAPMArduPlaneMockLink   (bool sendStatusText, bool enableCamera, bool enableGimbal, bool enableProximity = false, bool apmStartFreshParams = false, int videoStreamType = 0);
-    Q_INVOKABLE void    startAPMArduSubMockLink     (bool sendStatusText, bool enableCamera, bool enableGimbal, bool enableProximity = false, bool apmStartFreshParams = false, int videoStreamType = 0);
-    Q_INVOKABLE void    startAPMArduRoverMockLink   (bool sendStatusText, bool enableCamera, bool enableGimbal, bool enableProximity = false, bool apmStartFreshParams = false, int videoStreamType = 0);
+    /// Starts a MockLink whose MockConfiguration properties are set from the map (e.g. { name: "PX4", firmware: 12 })
+    Q_INVOKABLE void startMockLink(const QVariantMap& properties);
     Q_INVOKABLE void    stopOneMockLink             (void);
 
     Q_INVOKABLE bool linesIntersect(QPointF xLine1, QPointF yLine1, QPointF xLine2, QPointF yLine2);
+
+    /// Byte size with a locale-aware unit, as QGC::bigSizeToString().
+    Q_INVOKABLE static QString bigSizeToString(quint64 size);
 
     Q_INVOKABLE QString altitudeFrameExtraUnits(AltitudeFrame altFrame);        ///< String shown in the FactTextField.extraUnits ui
     Q_INVOKABLE QString altitudeFrameShortDescription(AltitudeFrame altFrame);  ///< String shown when a user needs to select an altitude frame
@@ -152,23 +147,43 @@ public:
     // Property accessors
 
     static QString appName();
-    LinkManager*            linkManager         ()  { return _linkManager; }
-    MultiVehicleManager*    multiVehicleManager ()  { return _multiVehicleManager; }
-    QGCMapEngineManager*    mapEngineManager    ()  { return _mapEngineManager; }
-    QGCPositionManager*     qgcPositionManger   ()  { return _qgcPositionManager; }
-    MissionCommandTree*     missionCommandTree  ()  { return _missionCommandTree; }
-    MAVLinkSigningKeys*     mavlinkSigningKeys  ()  { return _mavlinkSigningKeys; }
-    VideoManager*           videoManager        ()  { return _videoManager; }
-    QGCCorePlugin*          corePlugin          ()  { return _corePlugin; }
-    SettingsManager*        settingsManager     ()  { return _settingsManager; }
-#ifndef QGC_NO_SERIAL_LINK
-    FactGroup*              gpsRtkFactGroup     ()  { return _gpsRtkFactGroup; }
+    QObject* serialPortManager() const;
+
+    LinkManager* linkManager() { return _linkManager; }
+
+    MultiVehicleManager* multiVehicleManager() { return _multiVehicleManager; }
+
+    QGCMapEngineManager* mapEngineManager() { return _mapEngineManager; }
+
+    PositionManager* positionManager() const;
+
+    MissionCommandTree* missionCommandTree() { return _missionCommandTree; }
+
+    MAVLinkSigningKeys* mavlinkSigningKeys() { return _mavlinkSigningKeys; }
+
+    VideoManager* videoManager() { return _videoManager; }
+
+    QGCCorePlugin* corePlugin() { return _corePlugin; }
+
+    SettingsManager* settingsManager() { return _settingsManager; }
+
+    GPSManager* gpsManager() const;
+
+    ADSBVehicleManager* adsbVehicleManager() { return _adsbVehicleManager; }
+
+    QmlUnitsConversion* unitsConversion() { return &_unitsConversion; }
+
+    static QGeoCoordinate flightMapPosition() { return _coord; }
+
+    static double flightMapZoom() { return _zoom; }
+
+#ifdef QGC_UNITTEST_BUILD
+    static void setFlightMapViewForTest(const QGeoCoordinate& position, double zoom)
+    {
+        _coord = position;
+        _zoom = zoom;
+    }
 #endif
-    ADSBVehicleManager*     adsbVehicleManager  ()  { return _adsbVehicleManager; }
-    NTRIPManager*           ntripManager        ()  { return _ntripManager; }
-    QmlUnitsConversion*     unitsConversion     ()  { return &_unitsConversion; }
-    static QGeoCoordinate   flightMapPosition   ()  { return _coord; }
-    static double           flightMapZoom       ()  { return _zoom; }
 
     qreal zOrderTopMost             () { return 1000; }
     qreal zOrderWidgets             () { return 100; }
@@ -194,6 +209,7 @@ public:
 
     static QString qgcVersion();
     static QString qgcAppDate();
+    static QString newStableVersion();
 #ifdef QGC_DAILY_BUILD
     static bool qgcDailyBuild() { return true; }
 #else
@@ -205,13 +221,12 @@ signals:
     void mavlinkSystemIDChanged         (int id);
     void flightMapPositionChanged       (QGeoCoordinate flightMapPosition);
     void flightMapZoomChanged           (double flightMapZoom);
+    void newStableVersionChanged();
     void showMessageDialogRequested     (QObject* owner, QString title, QString text, int buttons, QJSValue acceptFunction, QJSValue closeFunction);
 
 private:
     QGCMapEngineManager*    _mapEngineManager       = nullptr;
     ADSBVehicleManager*     _adsbVehicleManager     = nullptr;
-    NTRIPManager*           _ntripManager           = nullptr;
-    QGCPositionManager*     _qgcPositionManager     = nullptr;
     MissionCommandTree*     _missionCommandTree     = nullptr;
     MAVLinkSigningKeys*     _mavlinkSigningKeys     = nullptr;
     VideoManager*           _videoManager           = nullptr;
@@ -220,9 +235,6 @@ private:
     SettingsManager*        _settingsManager        = nullptr;
     QGCCorePlugin*          _corePlugin             = nullptr;
     QGCPalette*             _globalPalette          = nullptr;
-#ifndef QGC_NO_SERIAL_LINK
-    FactGroup*              _gpsRtkFactGroup        = nullptr;
-#endif
 
     double                  _flightMapInitialZoom   = 17.0;
     QmlUnitsConversion      _unitsConversion;

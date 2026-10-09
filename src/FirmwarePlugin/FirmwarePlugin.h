@@ -87,6 +87,7 @@ public:
         ROIModeCapability =         1 << 5, ///< Vehicle supports ROI (both in Fly guided mode and from Plan creation)
         ChangeHeadingCapability =   1 << 6, ///< Vehicle supports changing heading at current location
         GuidedTakeoffCapability =   1 << 7, ///< Vehicle supports guided takeoff
+        VTOLMulticopterTakeoffCapability = 1 << 8, ///< VTOL supports MAV_CMD_NAV_TAKEOFF while remaining in multicopter mode
     };
 
     /// Parameter name remapping support:
@@ -373,6 +374,12 @@ public:
     /// Used to check if running firmware is latest stable version.
     virtual void checkIfIsLatestStable(Vehicle *vehicle) const;
 
+    /// Settings key identifying the stable firmware stream (firmware + vehicle class) for this vehicle
+    static QString stableFirmwareSettingsKey(const Vehicle* vehicle);
+
+    /// @return true if latestVersion is newer than seenVersion (or seenVersion is empty/unparseable)
+    static bool isStableFirmwareVersionUnseen(const QString& latestVersion, const QString& seenVersion);
+
     /// Used to check if running current version is equal or higher than the one being compared.
     /// returns 1 if current > compare, 0 if current == compare, -1 if current < compare
     int versionCompare(const Vehicle *vehicle, const QString &compare) const;
@@ -422,7 +429,8 @@ protected:
     virtual QString _getLatestVersionFileUrl(Vehicle* /*vehicle*/) const { return QString(); }
 
     /// Callback to process file with latest release information
-    virtual void _versionFileDownloadFinished(const QString &remoteFile, const QString &localFile, const Vehicle *vehicle) const;
+    virtual void _versionFileDownloadFinished(const QString& remoteFile, const QString& localFile,
+                                              Vehicle* vehicle) const;
 
     /// Returns regex QString to extract version information from text
     virtual QString _versionRegex() const { return QString(); }

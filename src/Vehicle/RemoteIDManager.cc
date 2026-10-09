@@ -1,12 +1,16 @@
 #include "RemoteIDManager.h"
+
+#include <utility>
+
+#include "GPSManager.h"
 #include "MAVLinkLib.h"
-#include "SettingsManager.h"
-#include "RemoteIDSettings.h"
+#include "MAVLinkProtocol.h"
 #include "PositionManager.h"
+#include "QGCLoggingCategory.h"
+#include "RemoteIDSettings.h"
+#include "SettingsManager.h"
 #include "Vehicle.h"
 #include "VehicleLinkManager.h"
-#include "MAVLinkProtocol.h"
-#include "QGCLoggingCategory.h"
 
 QGC_LOGGING_CATEGORY(RemoteIDManagerLog, "Vehicle.RemoteIDManager")
 
@@ -16,7 +20,6 @@ QGC_LOGGING_CATEGORY(RemoteIDManagerLog, "Vehicle.RemoteIDManager")
 #define MAVLINK_UNKNOWN_LAT 0
 #define MAVLINK_UNKNOWN_LON 0
 #define SENDING_RATE_MSEC 1000
-#define ALLOWED_GPS_DELAY 5000
 #define RID_TIMEOUT 2500 // Messages should be arriving at 1 Hz, so we set a 2 second timeout
 
 const uint8_t* RemoteIDManager::_id_or_mac_unknown = new uint8_t[MAVLINK_MSG_OPEN_DRONE_ID_OPERATOR_ID_FIELD_ID_OR_MAC_LEN]();
@@ -296,36 +299,39 @@ void RemoteIDManager::_sendSystem()
             _updateGcsPositionStatus(false, "The provided coordinates for FIXED position are invalid.");
         }
     } else {
-        QGCPositionManager* positionManager = QGCPositionManager::instance();
-        QGeoPositionInfo geoPositionInfo = positionManager->geoPositionInfo();
-        gcsPosition = positionManager->gcsPosition();
-        const QDateTime gcsPositionTimestamp = positionManager->gcsPositionTimestamp();
-
-        // gcsPosition only carries an altitude when the fix's vertical accuracy is within the
-        // strict gate QGCPositionManager applies for consumers which act on it, such as Follow Me
-        // and update-home-position. Remote ID mandates an operator altitude in FAA regions and
-        // OPEN_DRONE_ID_SYSTEM has no accuracy field for it, so a loosely known altitude is better
-        // than none here: take it straight from the fix whenever the fix reports one.
-        const QGeoCoordinate fixCoordinate = geoPositionInfo.coordinate();
-        if (fixCoordinate.type() == QGeoCoordinate::Coordinate3D) {
-            gcsPosition.setAltitude(fixCoordinate.altitude());
+        PositionManager* positionManager = GPSManager::instance()->positionManager();
+        const auto observation = positionManager->acceptedObservation(GPSObservation::PositionUse::RemoteID,
+                                                                      GPSSourceHealth::FRESHNESS_TIMEOUT);
+        if (observation) {
+            gcsPosition = observation->position.coordinate();
+            // An altitude of another or an unknown datum is still the best available operator altitude.
+            const bool notGeodetic =
+                observation->altitudeDatum != GPSAltitudeDatum::Ellipsoid && qIsFinite(gcsPosition.altitude());
+            if (notGeodetic && !std::exchange(_gcsAltitudeNotGeodeticReported, true)) {
+                qCWarning(RemoteIDManagerLog)
+                    << "GCS altitude is not a WGS84 ellipsoid height; sending it as the operator's geodetic altitude";
+            } else if (!notGeodetic) {
+                _gcsAltitudeNotGeodeticReported = false;
+            }
         }
 
-        if (!geoPositionInfo.isValid()) {
-            // Only warn if we've previously received a valid fix; otherwise the source is
-            // still initializing and the absence of data is expected, not an error.
-            _updateGcsPositionStatus(false, gcsPositionTimestamp.isValid()
-                                            ? QStringLiteral("GCS GPS data is not valid.")
-                                            : QString());
-        } else if (positionManager->gcsPositioningError() != QGeoPositionInfoSource::NoError && positionManager->gcsPositioningError() != QGeoPositionInfoSource::UpdateTimeoutError) {
-            _updateGcsPositionStatus(false, QString("GCS GPS data error: %1").arg(positionManager->gcsPositioningError()));
+        const auto sourceStatus = positionManager->sourceStatus();
+        const auto positioningError = positionManager->gcsPositioningError();
+        if (positioningError != QGeoPositionInfoSource::NoError &&
+            positioningError != QGeoPositionInfoSource::UpdateTimeoutError) {
+            _updateGcsPositionStatus(false, QString("GCS GPS data error: %1").arg(positioningError));
+        } else if (sourceStatus != PositionManager::SourceStatus::Active) {
+            const bool waiting = sourceStatus == PositionManager::SourceStatus::WaitingForFix ||
+                                 sourceStatus == PositionManager::SourceStatus::PermissionRequired;
+            _updateGcsPositionStatus(false, waiting ? QString() : positionManager->sourceStatusText());
+        } else if (!observation) {
+            _updateGcsPositionStatus(false, QStringLiteral("GCS GPS data is not valid."));
         } else if (!gcsPosition.isValid() || gcsPosition.type() == QGeoCoordinate::InvalidCoordinate) {
             _updateGcsPositionStatus(false, "GCS GPS data error: Invalid coordinate type.");
-        } else if (_settings->region()->rawValue().toInt() == static_cast<int>(RemoteIDSettings::RegionOperation::FAA) && gcsPosition.type() != QGeoCoordinate::Coordinate3D) {
-            // FAA requires altitude data, or else the GPS data is not good
+        } else if (_settings->region()->rawValue().toInt() ==
+                       static_cast<int>(RemoteIDSettings::RegionOperation::FAA) &&
+                   gcsPosition.type() != QGeoCoordinate::Coordinate3D) {
             _updateGcsPositionStatus(false, "GCS GPS data error: Altitude data is mandatory for FAA regions.");
-        } else if (!gcsPositionTimestamp.isValid() || (gcsPositionTimestamp.msecsTo(QDateTime::currentDateTimeUtc()) > ALLOWED_GPS_DELAY)) {
-            _updateGcsPositionStatus(false, "GCS GPS data is older than 5 seconds");
         } else {
             _updateGcsPositionStatus(true);
         }
@@ -337,25 +343,16 @@ void RemoteIDManager::_sendSystem()
     if (sharedLink) {
         mavlink_message_t msg;
 
-        mavlink_msg_open_drone_id_system_pack_chan(MAVLinkProtocol::instance()->getSystemId(),
-                                                    MAVLinkProtocol::getComponentId(),
-                                                    sharedLink->mavlinkChannel(),
-                                                    &msg,
-                                                    _targetSystem,
-                                                    _targetComponent,
-                                                    _id_or_mac_unknown,
-                                                    _settings->locationType()->rawValue().toUInt(),
-                                                    _settings->classificationType()->rawValue().toUInt(),
-                                                    _gcsPositionUsable ? ( gcsPosition.latitude()  * 1.0e7 ) : MAVLINK_UNKNOWN_LAT,
-                                                    _gcsPositionUsable ? ( gcsPosition.longitude() * 1.0e7 ) : MAVLINK_UNKNOWN_LON,
-                                                    AREA_COUNT,
-                                                    AREA_RADIUS,
-                                                    MAVLINK_UNKNOWN_METERS,
-                                                    MAVLINK_UNKNOWN_METERS,
-                                                    _settings->categoryEU()->rawValue().toUInt(),
-                                                    _settings->classEU()->rawValue().toUInt(),
-                                                    _gcsPositionUsable ? gcsPosition.altitude() : MAVLINK_UNKNOWN_METERS,
-                                                    _timestamp2019()), // Time stamp needs to be since 00:00:00 1/1/2019
+        mavlink_msg_open_drone_id_system_pack_chan(
+            MAVLinkProtocol::instance()->getSystemId(), MAVLinkProtocol::getComponentId(), sharedLink->mavlinkChannel(),
+            &msg, _targetSystem, _targetComponent, _id_or_mac_unknown, _settings->locationType()->rawValue().toUInt(),
+            _settings->classificationType()->rawValue().toUInt(),
+            _gcsPositionUsable ? (gcsPosition.latitude() * 1.0e7) : MAVLINK_UNKNOWN_LAT,
+            _gcsPositionUsable ? (gcsPosition.longitude() * 1.0e7) : MAVLINK_UNKNOWN_LON, AREA_COUNT, AREA_RADIUS,
+            MAVLINK_UNKNOWN_METERS, MAVLINK_UNKNOWN_METERS, _settings->categoryEU()->rawValue().toUInt(),
+            _settings->classEU()->rawValue().toUInt(),
+            _gcsPositionUsable && qIsFinite(gcsPosition.altitude()) ? gcsPosition.altitude() : MAVLINK_UNKNOWN_METERS,
+            _timestamp2019());
         _vehicle->sendMessageOnLinkThreadSafe(sharedLink.get(), msg);
     }
 }

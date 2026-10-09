@@ -71,7 +71,7 @@ MissionController::~MissionController()
 
 void MissionController::_resetMissionFlightStatus(void)
 {
-    _flightStatusCalc.reset(_controllerVehicle, _managerVehicle, _missionContainsVTOLTakeoff);
+    _flightStatusCalc.reset(_controllerVehicle, _managerVehicle, _missionStartsInVTOLMulticopterMode);
     _missionFlightStatus = _flightStatusCalc.status();
 
     emit missionPlannedDistanceChanged(_missionFlightStatus.plannedDistance);
@@ -314,8 +314,27 @@ VisualMissionItem* MissionController::insertSimpleMissionItem(QGeoCoordinate coo
 
 VisualMissionItem* MissionController::insertTakeoffItem(QGeoCoordinate /*coordinate*/, int visualItemIndex, bool makeCurrentItem)
 {
+    return _insertTakeoffItemWorker(
+        _controllerVehicle->vtol() ? MAV_CMD_NAV_VTOL_TAKEOFF : MAV_CMD_NAV_TAKEOFF,
+        visualItemIndex,
+        makeCurrentItem);
+}
+
+VisualMissionItem* MissionController::insertVTOLMulticopterTakeoffItem(
+    QGeoCoordinate /*coordinate*/, int visualItemIndex, bool makeCurrentItem)
+{
+    if (!TakeoffMissionItem::isVTOLMulticopterTakeoff(_controllerVehicle, MAV_CMD_NAV_TAKEOFF)) {
+        qCWarning(MissionControllerLog) << "Multicopter takeoff requested for an unsupported vehicle";
+        return nullptr;
+    }
+
+    return _insertTakeoffItemWorker(MAV_CMD_NAV_TAKEOFF, visualItemIndex, makeCurrentItem);
+}
+
+VisualMissionItem* MissionController::_insertTakeoffItemWorker(MAV_CMD command, int visualItemIndex, bool makeCurrentItem)
+{
     int sequenceNumber = _nextSequenceNumber();
-    _takeoffMissionItem = new TakeoffMissionItem(_controllerVehicle->vtol() ? MAV_CMD_NAV_VTOL_TAKEOFF : MAV_CMD_NAV_TAKEOFF, _masterController, _flyView, _settingsItem, false /* forLoad */);
+    _takeoffMissionItem = new TakeoffMissionItem(command, _masterController, _flyView, _settingsItem, false /* forLoad */);
     _takeoffMissionItem->setSequenceNumber(sequenceNumber);
     _initVisualItem(_takeoffMissionItem);
 
@@ -346,9 +365,10 @@ VisualMissionItem* MissionController::insertTakeoffItem(QGeoCoordinate /*coordin
 }
 
 bool MissionController::multipleLandPatternsAllowed(void) const {
-    // Can't have more than one land sequence unless allowed in settings and
-    // supported by the firmware
-    return _planViewSettings->allowMultipleLandingPatterns()
+    // Multiple landing sequences are a fixed-wing/VTOL landing pattern concept.
+    // Other vehicle types insert RTL, which only makes sense once per mission.
+    return (_controllerVehicle->fixedWing() || _controllerVehicle->vtol()) &&
+           _planViewSettings->allowMultipleLandingPatterns()
                ->rawValue().toBool() &&
            !_masterController->managerVehicle()->px4Firmware();
 }
@@ -362,7 +382,7 @@ VisualMissionItem* MissionController::insertLandItem(QGeoCoordinate coordinate, 
         VTOLLandingComplexItem* vtolLanding = qobject_cast<VTOLLandingComplexItem*>(insertComplexMissionItem(VTOLLandingComplexItem::canonicalName, coordinate, visualItemIndex, makeCurrentItem));
         return vtolLanding;
     } else {
-        return _insertSimpleMissionItemWorker(coordinate, _controllerVehicle->vtol() ? MAV_CMD_NAV_VTOL_LAND : MAV_CMD_NAV_RETURN_TO_LAUNCH, visualItemIndex, makeCurrentItem);
+        return _insertSimpleMissionItemWorker(coordinate, MAV_CMD_NAV_RETURN_TO_LAUNCH, visualItemIndex, makeCurrentItem);
     }
 }
 
@@ -989,13 +1009,14 @@ void MissionController::_recalcFlightPathSegments(void)
     bool                homePositionValid =         _settingsItem->coordinate().isValid();
     bool                roiActive =                 false;
     bool                previousItemIsIncomplete =  false;
-    bool                signalSplitSegmentChanged = false;
+
+    FlightPathSegment* newSplitSegment = nullptr;
 
     qCDebug(MissionControllerLog) << "_recalcFlightPathSegments homePositionValid" << homePositionValid;
 
     FlightPathSegmentHashTable oldSegmentTable = _flightPathSegmentHashTable;
 
-    _missionContainsVTOLTakeoff = false;
+    _missionStartsInVTOLMulticopterMode = false;
     _flightPathSegmentHashTable.clear();
 
     _simpleFlightPathSegments.beginResetModel();
@@ -1034,15 +1055,18 @@ void MissionController::_recalcFlightPathSegments(void)
 
             MAV_CMD command = simpleItem->mavCommand();
             switch (command) {
+            // A takeoff before any coordinate item means the mission starts from the ground: link it back to home
             case MAV_CMD_NAV_TAKEOFF:
+                if (!linkEndToHome && firstCoordinateNotFound) {
+                    _missionStartsInVTOLMulticopterMode =
+                        TakeoffMissionItem::isVTOLMulticopterTakeoff(_controllerVehicle, command);
+                    linkStartToHome = true;
+                }
+                break;
             case MAV_CMD_NAV_VTOL_TAKEOFF:
-                _missionContainsVTOLTakeoff = command == MAV_CMD_NAV_VTOL_TAKEOFF;
-                if (!linkEndToHome) {
-                    // If we still haven't found the first coordinate item and we hit a takeoff command this means the mission starts from the ground.
-                    // Link the first item back to home to show that.
-                    if (firstCoordinateNotFound) {
-                        linkStartToHome = true;
-                    }
+                if (!linkEndToHome && firstCoordinateNotFound) {
+                    _missionStartsInVTOLMulticopterMode = true;
+                    linkStartToHome = true;
                 }
                 break;
             case MAV_CMD_NAV_RETURN_TO_LAUNCH:
@@ -1101,10 +1125,12 @@ void MissionController::_recalcFlightPathSegments(void)
                     if (addDirectionArrow) {
                         _directionArrows.append(segment);
                     }
-                    if (visualItem->isCurrentItem() && _delayedSplitSegmentUpdate) {
-                        _splitSegment = segment;
-                        _delayedSplitSegmentUpdate = false;
-                        signalSplitSegmentChanged = true;
+                    // Same rule as setCurrentPlanViewSeqNum: the leg must start at a coordinate item other than home
+                    const bool legStartsAtCoordinateItem = lastFlyThroughVI != _settingsItem &&
+                                                           lastFlyThroughVI->specifiesCoordinate() &&
+                                                           !lastFlyThroughVI->isStandaloneCoordinate();
+                    if (!_flyView && visualItem->isCurrentItem() && legStartsAtCoordinateItem) {
+                        newSplitSegment = segment;
                     }
                     lastFlyThroughVI->setSimpleFlighPathSegment(segment);
                 }
@@ -1153,6 +1179,10 @@ void MissionController::_recalcFlightPathSegments(void)
     _simpleFlightPathSegments.endResetModel();
     _directionArrows.endResetModel();
 
+    // Must be updated before the old segments are deleted so _splitSegment never dangles
+    const bool signalSplitSegmentChanged = newSplitSegment != _splitSegment;
+    _splitSegment = newSplitSegment;
+
     // Anything left in the old table is an obsolete line object that can go
     qDeleteAll(oldSegmentTable);
 
@@ -1160,6 +1190,7 @@ void MissionController::_recalcFlightPathSegments(void)
 
     emit recalcTerrainProfile();
     if (signalSplitSegmentChanged) {
+        qCDebug(MissionControllerLog) << "splitSegmentSet:" << (_splitSegment != nullptr);
         emit splitSegmentChanged();
     }
 }
@@ -1172,7 +1203,9 @@ void MissionController::_recalcMissionFlightStatus()
 
     qCDebug(MissionControllerLog) << "_recalcMissionFlightStatus";
 
-    _flightStatusCalc.recalc(_visualItems, _settingsItem, _controllerVehicle, _managerVehicle, _appSettings, _planViewSettings, _missionContainsVTOLTakeoff);
+    _flightStatusCalc.recalc(
+        _visualItems, _settingsItem, _controllerVehicle, _managerVehicle, _appSettings, _planViewSettings,
+        _missionStartsInVTOLMulticopterMode);
     _missionFlightStatus = _flightStatusCalc.status();
     _minAMSLAltitude = _flightStatusCalc.minAMSLAltitude();
     _maxAMSLAltitude = _flightStatusCalc.maxAMSLAltitude();
@@ -2045,14 +2078,8 @@ void MissionController::setCurrentPlanViewSeqNum(int sequenceNumber, bool force)
                         for (int j=viIndex-1; j>0; j--) {
                             VisualMissionItem* pPrev = qobject_cast<VisualMissionItem*>(_visualItems->get(j));
                             if (pPrev->specifiesCoordinate() && !pPrev->isStandaloneCoordinate()) {
-                                VisualItemPair splitPair(pPrev, pVI);
-                                if (_flightPathSegmentHashTable.contains(splitPair)) {
-                                    _splitSegment = _flightPathSegmentHashTable[splitPair];
-                                } else {
-                                    // The recalc of flight path segments hasn't happened yet since it is delayed and compressed.
-                                    // So we need to register the fact that we need a split segment update and it will happen in the recalc instead.
-                                    _delayedSplitSegmentUpdate = true;
-                                }
+                                // Missing while a compressed segment recalc is pending; that recalc sets it instead
+                                _splitSegment = _flightPathSegmentHashTable.value(VisualItemPair(pPrev, pVI), nullptr);
                                 break;
                             }
                         }

@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 _COMMON_PATTERNS: list[str] = [
     r"^src/",
     r"^CMakeLists\.txt$",
+    r"^CMakePresets\.json$",
     r"^cmake/",
     r"^libs/",
     r"^resources/",
@@ -39,6 +40,9 @@ _COMMON_PATTERNS: list[str] = [
     r"^\.github/actions/",
     r"^\.github/scripts/",
     r"^\.github/build-config\.json$",
+    r"^\.github/workflows/_detect-changes\.yml$",
+    r"^tools/(?!setup/|tests/)",
+    r"^tools/setup/(install_qt\.py|install_python\.py|read_config\.py|install_dependencies/)",
 ]
 
 # Per-platform additional patterns
@@ -48,16 +52,19 @@ _PLATFORM_PATTERNS: dict[str, list[str]] = {
     "docker-linux": [
         # Single multi-stage Dockerfile builds every variant; any change rebuilds.
         r"^deploy/docker/Dockerfile$",
-        r"^deploy/docker/entrypoint\.sh$",
-        r"^deploy/docker/install-sysroot-aarch64\.sh$",
-        r"^deploy/docker/_docker-exec\.sh$",
+        r"^deploy/docker/entrypoint\.(sh|py)$",
+        r"^deploy/docker/install_sysroot_aarch64\.py$",
+        r"^deploy/docker/validate_native_package\.py$",
+        r"^deploy/docker/run-docker\.sh$",
+        r"^deploy/docker/run_docker\.py$",
         r"^deploy/docker/lib/",
         r"^deploy/linux/",
     ],
     "docker-android": [
         r"^deploy/docker/Dockerfile$",
-        r"^deploy/docker/entrypoint\.sh$",
-        r"^deploy/docker/_docker-exec\.sh$",
+        r"^deploy/docker/entrypoint\.(sh|py)$",
+        r"^deploy/docker/run_docker\.py$",
+        r"^deploy/docker/run-docker\.sh$",
         r"^deploy/docker/lib/",
         r"^android/",
         r"^deploy/android/",
@@ -92,6 +99,10 @@ def build_patterns(platform: str) -> list[re.Pattern[str]]:
     raw.append(rf"^\.github/workflows/{re.escape(wf)}\.yml$")
     raw.extend(_PLATFORM_PATTERNS.get(platform, []))
     raw.extend(_SETUP_PATTERNS.get(platform, []))
+    if platform.startswith("docker-"):
+        raw.append(
+            r"^deploy/docker/(_variants\.py|run_docker\.py|variants\.json|docker_helper\.py)$"
+        )
     return [re.compile(p) for p in raw]
 
 
@@ -196,8 +207,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--non-pr-passthrough",
         action="store_true",
-        help="Emit the reusable workflow's full output set as 'true' "
+        help="Emit the reusable workflow's full output set as a single value "
         "(used by _detect-changes.yml on push/merge_group/workflow_dispatch)",
+    )
+    parser.add_argument(
+        "--passthrough-value",
+        choices=("true", "false"),
+        default="true",
+        help="Value emitted for every output with --non-pr-passthrough (default: true)",
     )
     args = parser.parse_args(argv)
     if not args.non_pr_passthrough and not args.platform:
@@ -209,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     if args.non_pr_passthrough:
-        write_github_output(dict.fromkeys(_NON_PR_PASSTHROUGH_KEYS, "true"))
+        write_github_output(dict.fromkeys(_NON_PR_PASSTHROUGH_KEYS, args.passthrough_value))
         return 0
 
     platforms: list[str] = args.platform

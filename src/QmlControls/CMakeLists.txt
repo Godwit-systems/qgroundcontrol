@@ -15,6 +15,8 @@ target_sources(${CMAKE_PROJECT_NAME}
         HorizontalFactValueGrid.h
         InstrumentValueData.cc
         InstrumentValueData.h
+        MapMarkerGrouping.cc
+        MapMarkerGrouping.h
         MapPositionTracker.cc
         MapPositionTracker.h
         MavlinkAction.cc
@@ -55,6 +57,7 @@ target_sources(${CMAKE_PROJECT_NAME}
         QmlObjectListModel.h
         QmlObjectTreeModel.cc
         QmlObjectTreeModel.h
+        QmlUnitsConversion.cc
         QmlUnitsConversion.h
         RCChannelMonitorController.cc
         RCChannelMonitorController.h
@@ -168,7 +171,6 @@ qt_add_qml_module(QGroundControlControlsModule
         QGCTabButton.qml
         QGCTextField.qml
         QGCToolBarButton.qml
-        QGCToolInsets.qml
         QGCVectorImage.qml
         RCChannelMonitor.qml
         RCToParamDialog.qml
@@ -177,6 +179,7 @@ qt_add_qml_module(QGroundControlControlsModule
         SettingsButton.qml
         SettingsGroupLayout.qml
         SetupPage.qml
+        SidebarDivider.qml
         SliderSwitch.qml
         SubMenuButton.qml
         TimedProgressTracker.qml
@@ -209,11 +212,12 @@ qt_add_resources(QGroundControlControlsModule qmlcontrols_resources
     FILES
         "${CMAKE_SOURCE_DIR}/resources/ArrowRight.svg"
         "${CMAKE_SOURCE_DIR}/resources/buttonRight.svg"
-        "${CMAKE_SOURCE_DIR}/resources/chevron-down.svg"
-        "${CMAKE_SOURCE_DIR}/resources/chevron-up.svg"
+        "${CMAKE_SOURCE_DIR}/resources/chevron-double-down.svg"
+        "${CMAKE_SOURCE_DIR}/resources/chevron-double-up.svg"
         "${CMAKE_SOURCE_DIR}/resources/clockwise-arrow.svg"
         "${CMAKE_SOURCE_DIR}/resources/counter-clockwise-arrow.svg"
         "${CMAKE_SOURCE_DIR}/resources/JoystickBezelLight.png"
+        "${CMAKE_SOURCE_DIR}/resources/UpdateAvailable.svg"
 )
 
 # subMenuButtonImage.png aliases the shared CogWheels.png at the repo root.

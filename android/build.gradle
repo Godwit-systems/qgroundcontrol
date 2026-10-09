@@ -6,7 +6,7 @@ buildscript {
 
     dependencies {
         classpath 'com.android.tools.build:gradle:9.2.1'
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0"
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.20"
     }
 }
 
@@ -95,7 +95,7 @@ android {
     }
 
     lint {
-        abortOnError = false
+        abortOnError = true
         checkReleaseBuilds = true
         lintConfig = file("lint.xml")
     }

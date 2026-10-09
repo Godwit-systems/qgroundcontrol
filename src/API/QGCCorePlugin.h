@@ -9,6 +9,7 @@
 class ComplexMissionItem;
 class FactMetaData;
 class LinkInterface;
+class LinkManager;
 class PlanCreator;
 class PlanMasterController;
 class QFile;
@@ -17,6 +18,7 @@ class QGeoPositionInfoSource;
 class QmlObjectListModel;
 class QQmlApplicationEngine;
 class QQuickItem;
+class SettingsManager;
 class Vehicle;
 class VideoReceiver;
 class VideoSink;
@@ -47,7 +49,9 @@ class QGCCorePlugin : public QObject
     Q_PROPERTY(int initialSetupPromptId                 MEMBER kInitialSetupPromptId                                       CONSTANT)
     Q_PROPERTY(const QGCOptions *options                READ options                                                        CONSTANT)
     Q_PROPERTY(const QmlObjectListModel *customMapItems READ customMapItems                                                 CONSTANT)
+    Q_PROPERTY(const QmlObjectListModel* customGeoMapItems READ customGeoMapItems CONSTANT)
     Q_PROPERTY(QString showAdvancedUIMessage            READ showAdvancedUIMessage                                          CONSTANT)
+    Q_PROPERTY(QString stableDownloadUrl                READ stableDownloadUrl                                              CONSTANT)
     Q_PROPERTY(QVariantList analyzePages                READ analyzePages                                                   CONSTANT)
     Q_PROPERTY(QVariantList toolBarIndicators           READ toolBarIndicators                                              CONSTANT)
 
@@ -59,6 +63,9 @@ public:
 
     virtual void init() { }
     virtual void cleanup() { }
+
+    /// Called at boot after saved link configurations are loaded and before auto-connect links are started
+    virtual void linkConfigurationsLoaded(LinkManager* linkManager) { Q_UNUSED(linkManager); }
 
     /// The list of pages/buttons under the Analyze Menu
     /// @return A list of QmlPageInfo
@@ -83,6 +90,11 @@ public:
     ///     @param userVisible - true: Setting should be visible in ui, false: Setting should not be shown in ui (default value will be used as value)
     /// If not overridden, metaData and userVisible are left unchanged.
     virtual void adjustSettingMetaData(const QString &settingsGroup, FactMetaData &metaData, bool &userVisible);
+
+    /// Called at the end of SettingsManager::init. Override to register custom build
+    /// settings groups via SettingsManager::registerCustomSettingsGroup so generated
+    /// settings pages can reference them as QGroundControl.settingsManager.<accessor>.
+    virtual void registerCustomSettings(SettingsManager *settingsManager) { Q_UNUSED(settingsManager); }
 
     /// @return The message to show to the user when they are prompted to confirm turning on advanced ui.
     virtual QString showAdvancedUIMessage() const;
@@ -127,6 +139,11 @@ public:
     /// Allows custom builds to add custom items to the FlightMap. Objects put into QmlObjectListModel should derive from QmlComponentInfo and set the url property.
     virtual const QmlObjectListModel *customMapItems();
 
+    /// GeoMap counterpart of customMapItems, shown when the Fly View uses the GeoMap engine. Same QmlComponentInfo/url
+    /// contract; each component is created in the map with its customMapObject, scene and surfaceModel properties set,
+    /// so its root should be a GeoMapItem (or declare those properties and pass scene/surfaceModel on to GeoMap items).
+    virtual const QmlObjectListModel* customGeoMapItems();
+
     /// Allows custom builds to add custom items to the plan file before the document is created.
     virtual void preSaveToJson(PlanMasterController *pController, QJsonObject &json) { Q_UNUSED(pController); Q_UNUSED(json); }
     /// Allows custom builds to add custom items to the plan file after the document is created.
@@ -154,9 +171,9 @@ public:
     virtual QString stableVersionCheckFileUrl() const { return QStringLiteral("https://s3-us-west-2.amazonaws.com/qgroundcontrol/latest/QGC.version.txt"); }
 #endif
 
-    /// Returns the user visible url to show user where to download new stable builds from.
+    /// Returns the full URL (including scheme) opened by the Update button and the new version dialog link.
     /// Custom builds must override to provide their own location.
-    virtual QString stableDownloadLocation() const { return QStringLiteral("qgroundcontrol.com"); }
+    virtual QString stableDownloadUrl() const { return QStringLiteral("https://qgroundcontrol.com"); }
 
     /// Returns the complex mission items to display in the Plan UI.
     /// Each entry in the list is a QVariantMap with keys:

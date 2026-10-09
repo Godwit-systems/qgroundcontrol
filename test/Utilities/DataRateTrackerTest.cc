@@ -39,20 +39,45 @@ void DataRateTrackerTest::testRecordBytesAccumulates()
 // testReset
 // ---------------------------------------------------------------------------
 
+void DataRateTrackerTest::testReset_data()
+{
+    QTest::addColumn<bool>("keepTotal");
+    QTest::newRow("reset") << false;
+    QTest::newRow("reset-rate") << true;
+}
+
 void DataRateTrackerTest::testReset()
 {
-    DataRateTracker tracker;
+    QFETCH(bool, keepTotal);
+    quint64 nowUs = 1000000;
+    DataRateTracker tracker([&nowUs]() { return nowUs; });
 
     tracker.recordBytes(512);
+    nowUs += 1000000;
     tracker.recordBytes(1024);
+    QVERIFY(tracker.rateUpdated());
     QCOMPARE(tracker.totalBytes(), static_cast<quint64>(1536));
 
-    tracker.reset();
+    nowUs += 500000;
+    if (keepTotal) {
+        tracker.resetRate();
+    } else {
+        tracker.reset();
+    }
 
-    QCOMPARE(tracker.totalBytes(), static_cast<quint64>(0));
+    QCOMPARE(tracker.totalBytes(), static_cast<quint64>(keepTotal ? 1536 : 0));
     QCOMPARE(tracker.bytesPerSec(), 0.0);
     QCOMPARE(tracker.kBps(), 0.0);
     QVERIFY(!tracker.rateUpdated());
+
+    // The rate window restarts at the reset.
+    nowUs += 999999;
+    tracker.refresh();
+    QVERIFY(!tracker.rateUpdated());
+    ++nowUs;
+    tracker.refresh();
+    QVERIFY(tracker.rateUpdated());
+    QCOMPARE(tracker.bytesPerSec(), 0.0);
 }
 
 // ---------------------------------------------------------------------------
@@ -72,4 +97,43 @@ void DataRateTrackerTest::testKBpsConversion()
     QCOMPARE(tracker.kBps(), tracker.bytesPerSec() / 1024.0);
 }
 
-UT_REGISTER_TEST(DataRateTrackerTest, TestLabel::Unit)
+void DataRateTrackerTest::testRefreshDuringSilence()
+{
+    quint64 nowUs = 1000000;
+    DataRateTracker tracker([&nowUs]() { return nowUs; });
+    tracker.recordBytes(2048);
+    nowUs += 999999;
+    tracker.refresh();
+    QVERIFY(!tracker.rateUpdated());
+    QCOMPARE(tracker.bytesPerSec(), 0.0);
+
+    ++nowUs;
+    tracker.refresh();
+    QVERIFY(tracker.rateUpdated());
+    QCOMPARE(tracker.bytesPerSec(), 2048.0);
+    QCOMPARE(tracker.kBps(), 2.0);
+    nowUs += 1000000;
+    tracker.refresh();
+    QVERIFY(tracker.rateUpdated());
+    QCOMPARE(tracker.bytesPerSec(), 0.0);
+    QCOMPARE(tracker.totalBytes(), quint64(2048));
+
+    nowUs += 500000;
+    tracker.recordBytes(1024);
+    QVERIFY(!tracker.rateUpdated());
+    nowUs += 500000;
+    tracker.recordBytes(1024);
+    QVERIFY(tracker.rateUpdated());
+    QCOMPARE(tracker.bytesPerSec(), 2048.0);
+    QCOMPARE(tracker.totalBytes(), quint64(4096));
+
+    nowUs += 3000000;
+    tracker.refresh();
+    QCOMPARE(tracker.bytesPerSec(), 0.0);
+    QCOMPARE(tracker.totalBytes(), quint64(4096));
+    tracker.reset();
+    QCOMPARE(tracker.totalBytes(), quint64(0));
+    QVERIFY(!tracker.rateUpdated());
+}
+
+QGC_REGISTER_PORTABLE_TEST(DataRateTrackerTest, TestLabel::Unit)

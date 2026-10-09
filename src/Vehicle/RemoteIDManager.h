@@ -3,7 +3,6 @@
 #include <QtCore/QObject>
 #include <QtCore/QDateTime>
 #include <QtCore/QTimer>
-#include <QtPositioning/QGeoPositionInfo>
 #include <QtQmlIntegration/QtQmlIntegration>
 
 #include "MAVLinkMessageType.h"
@@ -90,6 +89,7 @@ private:
     bool    _ridDeviceCommsGood;
     bool    _gcsPositionUsable;
     QString _gcsPositionError;
+    bool _gcsAltitudeNotGeodeticReported = false;
     bool    _vehicleReportsBasicIDMissing;
 
     bool        _emergencyDeclared;

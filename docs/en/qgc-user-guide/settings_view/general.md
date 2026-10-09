@@ -1,17 +1,15 @@
 # General Settings (Settings View)
 
 The general settings (**SettingsView > General Settings**) are the main place for application-level configuration.
-Settable values include: display units, autoconnection devices, video display and storage, RTK GPS, brand image, and other miscellaneous settings.
+Settable values include: display units, autoconnection devices, video display and storage, brand image, and other miscellaneous settings.
 
 ::: info
 Values are settable even if no vehicle is connected. Settings that require a vehicle restart are indicated in the UI.
 :::
 
-
 ## Units
 
 This section defines the display units used in the application.
-
 
 The settings are:
 
@@ -24,11 +22,9 @@ The settings are:
 
 This section defines a number of miscellaneous settings, related to (non exhaustively): font sizes, colour schemes, map providers, map types, telemetry logging, audio output, low battery announcement levels, default mission altitude, [virtual joysticks](../settings_view/virtual_joystick.md), mission autoloading, default application file load/save path etc.
 
-
 The settings are:
 
 - <a id="language"></a>**Language**: System (System Language) | Bulgarian, Chinese, ...
-
 
   Translations are generally built into the application and selected automatically based on the system language.
 
@@ -52,14 +48,12 @@ The settings are:
 
 ## Data Persistence {#data_persistence}
 
-
 The settings are:
 
 - **Disable all data persistence**: Check to prevent any data being saved or cached: logs, map tiles etc.
   This setting disables the [telemetry logs section](#telemetry_logs).
 
 ## Telemetry Logs from Vehicle {#telemetry_logs}
-
 
 The settings are:
 
@@ -69,7 +63,6 @@ The settings are:
 - [**CSV Logging**](csv.md): Log subset of telemetry data to a CSV file.
 
 ## Fly View {#fly_view}
-
 
 The settings are:
 
@@ -91,7 +84,6 @@ The settings are:
 
 ## Plan View {#plan_view}
 
-
 The settings are:
 
 - **Default Mission Altitude**: The default altitude used for the Mission Start Panel, and hence for the first waypoint.
@@ -100,7 +92,6 @@ The settings are:
 
 This section defines the set of devices to which _QGroundControl_ will auto-connect.
 
-
 Settings include:
 
 - **Pixhawk:** Autoconnect to Pixhawk-series device
@@ -108,70 +99,18 @@ Settings include:
 - **PX4 Flow:** Autoconnect to PX4Flow device
 - **LibrePilot:** Autoconnect to Libre Pilot autopilot
 - **UDP:** Autoconnect to UDP
-- **RTK GPS:** Autoconnect to RTK GPS device
-- **NMEA GPS Device:** Autoconnect to an external GPS device to get ground station position ([see below](#nmea_gps))
 
-### Ground Station Location (NMEA GPS Device) {#nmea_gps}
+GNSS receivers connect automatically with **Connect automatically** in the [GNSS Receiver](gnss_receiver.md#receiver) settings.
 
-_QGroundControl_ will automatically use an internal GPS to display its own location on the map with a purple `Q` icon (if the GPS provides a heading, this will be also indicated by the icon).
-It may also use the GPS as a location source for _Follow Me Mode_ - currently supported on [PX4 Multicopters only](https://docs.px4.io/en/flight_modes/follow_me.html).
+### Ground Station Location {#nmea_gps}
 
-You can also configure QGC to connect to an external GPS device via a serial or UDP port.
-The GPS device must support the ASCII NMEA format - this is normally the case.
-
-::: tip
-A higher quality external GPS system may be useful even if the ground station has internal GPS support.
-:::
-
-Use the _NMEA GPS Device_ drop-down selector to manually select the GPS device and other options:
-
-- USB connection:
-
-
-  - **NMEA GPS Device:** _Serial_
-  - **NMEA GPS Baudrate**: The baudrate for the serial port
-
-  :::tip
-  To troubleshoot serial GPS problems: Disable RTK GPS [auto connection](#auto_connect), close _QGroundControl_, reconnect your GPS, and open QGC.
-  :::
-
-- Network connection:
-
-
-  - **NMEA GPS Device:** _UDP Port_.
-  - **NMEA Stream UDP Port**: The UDP port on which QGC will listen for NMEA data (QGC binds the port as a server)
+The ground station position, including from an external GNSS receiver, is configured in the [GNSS Receiver](gnss_receiver.md#gcs_position) settings.
 
 ## RTK GPS {#rtk_gps}
 
-This section allows you to specify the RTK GPS "Survey-in" settings, to save and reuse the result of a Survey-In operation, or to directly enter any other known position for the base station.
-
-
-::: info
-The _Survey-In_ process is a startup procedure required by RTK GPS systems to get an accurate estimate of the base station position.
-The process takes measurements over time, leading to increasing position accuracy.
-Both of the setting conditions must met for the Survey-in process to complete.
-For more information see [RTK GPS](https://docs.px4.io/en/advanced_features/rtk-gps.html) (PX4 docs) and [GPS- How it works](http://ardupilot.org/copter/docs/common-gps-how-it-works.html#rtk-corrections) (ArduPilot docs).
-:::
-
-::: tip
-In order to save and reuse a base position (because Survey-In is time consuming!) perform Survey-In once, select _Use Specified Base Position_ and press **Save Current Base Position** to copy in the values for the last survey.
-The values will then persist across QGC reboots until they are changed.
-:::
-
-The settings are:
-
-- Perform Survey-In
-  - **Survey-in accuracy (U-blox only):** The minimum position accuracy for the RTK Survey-In process to complete.
-  - **Minimum observation duration:** The minimum time that will be taken for the RTK Survey-in process.
-- Use Specified Base Position
-  - **Base Position Latitude:** Latitude of fixed RTK base station.
-  - **Base Position Longitude:** Longitude of fixed RTK base station.
-  - **Base Position Alt (WGS84):** Altitude of fixed RTK base station.
-  - **Base Position Accuracy:** Accuracy of base station position information.
-  - **Save Current Base Position** (button): Press to copy settings from the last Survey-In operation to the _Use Specified Base Position_ fields above.
+RTK base station receivers are configured in the [GNSS Receiver](gnss_receiver.md#receiver) settings, and NTRIP and UDP corrections in [RTK Corrections](ntrip_rtk.md).
 
 ## ADSB Server {#adsb_server}
-
 
 The settings are:
 
@@ -198,7 +137,6 @@ The steps are:
 
 The _Video_ section is used to define the source and connection settings for video that will be displayed in _Fly View_.
 
-
 The settings are:
 
 - **Video Source**: Video Stream Disabled | RTSP Video Stream | UDP h.264 Video Stream | UDP h.265 Video Stream | TCP-MPEG2 Video Stream | MPEG-TS Video Stream | Integrated Camera
@@ -217,8 +155,6 @@ The settings are:
 The _Video Recording_ section is used to specify the file format and maximum allocated file storage for storing video.
 Videos are saved to a sub-directory ("Video") of the [Application Load/Save Path](#load_save_path).
 
-
-
 The settings are:
 
 - **Auto-Delete Files**: If checked, files are auto deleted when the specified amount of storage is used.
@@ -231,7 +167,6 @@ This setting specifies the _brand image_ used for indoor/outdoor colour schemes.
 
 The brand image is displayed in place of the icon for the connected autopilot in the top right corner of the toolbar.
 It is provided so that users can easily create screen/video captures that include a company logo/branding.
-
 
 The settings are:
 

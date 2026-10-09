@@ -100,7 +100,6 @@ void ParameterDiffDialogUITest::_testDiffDialogCases()
                 TestFixtures::TempFileFixture tempFile(QStringLiteral("test_XXXXXX.param"));
                 QVERIFY(tempFile.isValid());
                 QVERIFY(tempFile.write(QByteArray(kMPParamsNoDiff)));
-                QVERIFY(tempFile.file()->flush());
 
                 _openDiffDialogForFile(tempFile.path());
                 if (QTest::currentTestFailed())
@@ -124,7 +123,6 @@ void ParameterDiffDialogUITest::_testDiffDialogCases()
                 TestFixtures::TempFileFixture tempFile(QStringLiteral("test_XXXXXX.param"));
                 QVERIFY(tempFile.isValid());
                 QVERIFY(tempFile.write(QByteArray(kMPParamsMissingParam)));
-                QVERIFY(tempFile.file()->flush());
 
                 _openDiffDialogForFile(tempFile.path());
                 if (QTest::currentTestFailed())
@@ -153,7 +151,6 @@ void ParameterDiffDialogUITest::_testDiffDialogCases()
                 TestFixtures::TempFileFixture tempFile(QStringLiteral("test_XXXXXX.params"));
                 QVERIFY(tempFile.isValid());
                 QVERIFY(tempFile.write(QByteArray(kQGCParamsUnknownParam)));
-                QVERIFY(tempFile.file()->flush());
 
                 _openDiffDialogForFile(tempFile.path());
                 if (QTest::currentTestFailed())
@@ -215,7 +212,6 @@ void ParameterDiffDialogUITest::_testDiffDialogCases()
                 TestFixtures::TempFileFixture tempFile(QStringLiteral("test_XXXXXX.params"));
                 QVERIFY(tempFile.isValid());
                 QVERIFY(tempFile.write(QByteArray(kQGCParamsTwoDiffs)));
-                QVERIFY(tempFile.file()->flush());
 
                 _openDiffDialogForFile(tempFile.path());
                 if (QTest::currentTestFailed())
@@ -282,7 +278,6 @@ void ParameterDiffDialogUITest::_testDiffDialogCases()
                 TestFixtures::TempFileFixture tempFile(QStringLiteral("test_XXXXXX.params"));
                 QVERIFY(tempFile.isValid());
                 QVERIFY(tempFile.write(QByteArray(kQGCParamsWithDiff)));
-                QVERIFY(tempFile.file()->flush());
 
                 _openDiffDialogForFile(tempFile.path());
                 if (QTest::currentTestFailed())
@@ -295,8 +290,9 @@ void ParameterDiffDialogUITest::_testDiffDialogCases()
                 if (QTest::currentTestFailed())
                     return;
 
-                // SYS_AUTOSTART is reboot-required, so accepting pops the reboot advisory
-                expectAppMessage(QRegularExpression(QStringLiteral("Reboot vehicle for changes to take effect")));
+                // SYS_AUTOSTART is reboot-required, so accepting pops the reboot-required notice
+                expectAppMessage(
+                    QRegularExpression(QStringLiteral("Vehicle reboot required for changes to take effect")));
                 QVERIFY2(acceptDialog(), "Failed to accept diff dialog");
 
                 // Verify the new value actually reached the (mock) vehicle

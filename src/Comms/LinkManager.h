@@ -1,27 +1,25 @@
 #pragma once
 
+#include <functional>
+#include <limits>
+#include <memory>
+
 #include <QtCore/QList>
 #include <QtCore/QMutex>
 #include <QtCore/QMutexLocker>
 #include <QtCore/QStringList>
 #include <QtQmlIntegration/QtQmlIntegration>
 
-#include <limits>
-
 #include "LinkConfiguration.h"
 #include "LinkInterface.h"
-#ifndef QGC_NO_SERIAL_LINK
-    #include "QGCSerialPortInfo.h"
-#endif
 
 class AutoConnectSettings;
 class LogReplayLink;
 class MAVLinkProtocol;
 class QmlObjectListModel;
 class QTimer;
-class SerialLink;
+class SerialAutoConnect;
 class UDPConfiguration;
-class UdpIODevice;
 
 /// @brief Manage communication links
 ///        The Link Manager organizes the physical Links. It can manage arbitrary
@@ -81,6 +79,8 @@ public:
     /// Sets the flag to allow new connections to be made
     void setConnectionsAllowed() { _connectionsSuspended = false; }
 
+    bool connectionsSuspended() const { return _connectionsSuspended; }
+
     /// Creates, connects (and adds) a link  based on the given configuration instance.
     bool createConnectedLink(SharedLinkConfigurationPtr &config);
 
@@ -104,6 +104,7 @@ public:
     bool containsLink(const LinkInterface *link);
 
     SharedLinkConfigurationPtr addConfiguration(LinkConfiguration *config);
+    bool containsConfiguration(const QString& name) const;
 
     void startAutoConnectedLinks();
 
@@ -131,7 +132,9 @@ private:
     void _addUDPAutoConnectLink();
     void _addMAVLinkForwardingLink();
     void _reconnectAutoConnectLinks();
-    void _createDynamicForwardLink(const char *linkName, const QString &hostName);
+    /// (Re)connects a timer-driven dynamic UDP link, reusing its config so reconnect backoff applies
+    void _retryDynamicUdpLink(const QString& name, const std::function<void(UDPConfiguration&)>& configure);
+    SharedLinkConfigurationPtr _findDynamicUdpConfiguration(const QString& name) const;
 
     QTimer *_portListTimer = nullptr;
     QmlObjectListModel *_qmlConfigurations = nullptr;
@@ -153,13 +156,6 @@ private:
     static constexpr const char *_mavlinkForwardingSupportLinkName = "MAVLink Support Forwarding Link";
 
     static constexpr int _autoconnectUpdateTimerMSecs = 1000;
-#ifdef Q_OS_WIN
-    // Have to manually let the bootloader go by on Windows to get a working connect
-    static constexpr int _autoconnectConnectDelayMSecs = 6000;
-#else
-    static constexpr int _autoconnectConnectDelayMSecs = 1000;
-#endif
-
 #ifndef QGC_NO_SERIAL_LINK
 private:
     Q_PROPERTY(QStringList serialBaudRates   READ serialBaudRates   CONSTANT)
@@ -176,23 +172,9 @@ signals:
     void commPortsChanged();
 
 private:
-    bool _isSerialPortConnected();
     void _updateSerialPorts();
-    bool _allowAutoConnectToBoard(QGCSerialPortInfo::BoardType_t boardType) const;
-    void _addSerialAutoConnectLink();
-    bool _portAlreadyConnected(const QString &portName);
-    void _filterCompositePorts(QList<QGCSerialPortInfo> &portList);
-
-    QMap<QString, int> _autoconnectPortWaitList;   ///< key: QGCSerialPortInfo::systemLocation, value: wait count
-    QList<SerialLink*> _activeLinkCheckList;       ///< List of links we are waiting for a vehicle to show up on
+    std::unique_ptr<SerialAutoConnect> _serialAutoConnect;
     QStringList _commPortList;
     QStringList _commPortDisplayList;
-    QString _autoConnectRTKPort;
-    QString _nmeaDeviceName;
-    uint32_t _nmeaBaud = 0;
-    QSerialPort *_nmeaPort = nullptr;
 #endif // QGC_NO_SERIAL_LINK
-
-    // NMEA UDP is network-only; available regardless of QGC_NO_SERIAL_LINK.
-    UdpIODevice *_nmeaSocket = nullptr;
 };

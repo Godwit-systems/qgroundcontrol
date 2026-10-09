@@ -40,9 +40,9 @@ from common.gh_actions import (
     write_github_output,
     write_step_summary,
 )
-from common.io import extract_tar_data, extract_zip_safe, sha256_file
+from common.io import extract_tar_data, extract_zip_safe
 from common.markdown import md_table
-from common.net import download_with_retry
+from common.net import download_file
 from common.platform import host_arch, is_linux
 from common.proc import run_captured
 from common.tool_version import probe_version, version_prefix_matches
@@ -66,10 +66,7 @@ def _install_release_binary(
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
         archive_path = temp_path / archive_name
-        download_with_retry(url, archive_path)
-        actual = sha256_file(archive_path)
-        if actual != sha256:
-            raise RuntimeError(f"SHA256 mismatch: {actual} != {sha256}")
+        download_file(url, archive_path, expected_sha256=sha256)
         extract(archive_path, temp_path)
         source = locate_source(temp_path)
         if not source.exists():
@@ -191,15 +188,6 @@ class CcacheInstaller:
 
         return self.DEFAULT_MAX_SIZE
 
-    def download_with_retry(self, url: str, dest: Path) -> bool:
-        """Download file with retry logic. Returns False on exhaustion."""
-        try:
-            download_with_retry(url, dest, attempts=self.max_retries, delay=self.retry_delay)
-            return True
-        except RuntimeError as e:
-            print(f"Download failed: {e}", file=sys.stderr)
-            return False
-
     def download_with_verify(self, temp_dir: Path) -> Path | None:
         """Download ccache archive and verify its signature."""
         archive_name = f"ccache-{self.version}-linux-{self.arch}-glibc.tar.xz"
@@ -209,12 +197,26 @@ class CcacheInstaller:
         ccache_url = f"{self.CCACHE_RELEASE_URL}/v{self.version}/{archive_name}"
         sig_url = f"{ccache_url}.minisig"
 
-        if not self.download_with_retry(ccache_url, archive_path):
-            print("Error: Failed to download ccache archive", file=sys.stderr)
+        try:
+            download_file(
+                ccache_url,
+                archive_path,
+                attempts=self.max_retries,
+                retry_backoff_seconds=self.retry_delay,
+            )
+        except RuntimeError as error:
+            print(f"Error: Failed to download ccache archive: {error}", file=sys.stderr)
             return None
 
-        if not self.download_with_retry(sig_url, sig_path):
-            print("Error: Failed to download signature file", file=sys.stderr)
+        try:
+            download_file(
+                sig_url,
+                sig_path,
+                attempts=self.max_retries,
+                retry_backoff_seconds=self.retry_delay,
+            )
+        except RuntimeError as error:
+            print(f"Error: Failed to download signature file: {error}", file=sys.stderr)
             return None
 
         minisign_bin = self._setup_minisign(temp_dir)
@@ -234,15 +236,16 @@ class CcacheInstaller:
         minisign_url = f"{self.MINISIGN_RELEASE_URL}/{self.MINISIGN_VERSION}/{minisign_archive}"
         minisign_path = temp_dir / minisign_archive
 
-        if not self.download_with_retry(minisign_url, minisign_path):
-            return None
-
-        actual_hash = sha256_file(minisign_path)
-        if actual_hash != self.MINISIGN_ARCHIVE_SHA256:
-            print(
-                f"Error: minisign archive hash mismatch: {actual_hash} != {self.MINISIGN_ARCHIVE_SHA256}",
-                file=sys.stderr,
+        try:
+            download_file(
+                minisign_url,
+                minisign_path,
+                expected_sha256=self.MINISIGN_ARCHIVE_SHA256,
+                attempts=self.max_retries,
+                retry_backoff_seconds=self.retry_delay,
             )
+        except RuntimeError as error:
+            print(f"Error: Failed to download minisign: {error}", file=sys.stderr)
             return None
 
         try:
@@ -478,7 +481,9 @@ def run_summary() -> int:
         )
 
     if parts:
-        write_step_summary("\n".join(parts))
+        summary = "\n".join(parts)
+        print(summary)
+        write_step_summary(summary)
     return 0
 
 
@@ -503,6 +508,8 @@ def determine_cache_scope(event_name: str, ref_name: str, pr_number: str = "") -
     scope = "shared"
     if event_name == "pull_request":
         scope = f"pr-{pr_number or 'unknown'}"
+    elif ref_name == "master" and event_name in {"push", "schedule", "workflow_dispatch"}:
+        scope = "shared"
     elif event_name == "workflow_dispatch":
         scope = f"manual-{ref_name}"
     elif event_name == "push":
@@ -586,6 +593,17 @@ def add_windows_binary_to_path(version: str, arch: str, runner_temp: Path) -> Pa
     if result.stdout:
         print(result.stdout.strip())
     return install_dir
+
+
+def ci_cache_budget(host: str, build_type: str, variant: str, backend: str, s3_size: str) -> str:
+    """Keep large object sets resident without enlarging every GitHub archive."""
+    if backend == "s3":
+        return s3_size
+    if host.startswith("windows") or variant in {"coverage", "sanitizers", "asan", "ubsan", "tsan"}:
+        return "3G"
+    if build_type == "Debug" or host in {"mac", "macos"}:
+        return "2G"
+    return "1G"
 
 
 def configure_ccache_environment(workspace: Path, max_size: str = "2G") -> Path:
@@ -719,6 +737,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     env_cfg = sub.add_parser("configure-env", help="Configure ccache GitHub environment variables")
     env_cfg.add_argument("--workspace", type=Path, required=True)
     env_cfg.add_argument("--max-size", default="2G", help="Maximum ccache size (default: 2G)")
+    env_cfg.add_argument("--backend", choices=["github", "s3"], help="Select a CI cache budget")
+    env_cfg.add_argument("--host", default="")
+    env_cfg.add_argument("--build-type", default="Release")
+    env_cfg.add_argument("--variant", default="")
 
     return parser.parse_args(argv)
 
@@ -806,7 +828,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "configure-env":
+        if args.backend:
+            args.max_size = ci_cache_budget(
+                args.host, args.build_type, args.variant, args.backend, args.max_size
+            )
         ccache_dir = configure_ccache_environment(args.workspace, args.max_size)
+        print(f"Compiler cache budget: {args.max_size}")
         print(ccache_dir)
         return 0
 

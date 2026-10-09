@@ -1,16 +1,17 @@
 #pragma once
 
-#include <QtCore/QChronoTimer>
-#include <QtCore/QLoggingCategory>
-#include <QtNetwork/QSslSocket>
-#include <QtNetwork/QTcpSocket>
 #include <chrono>
 
-#include "NTRIPTransport.h"
-#include "NTRIPTransportConfig.h"
-#include "RTCMParser.h"
+#include <QtCore/QPointer>
+#include <QtCore/QString>
 
-Q_DECLARE_LOGGING_CATEGORY(NTRIPHttpTransportLog)
+#include "NTRIPConfiguration.h"
+#include "NTRIPTransport.h"
+#include "RTCMFramer.h"
+#include "ScheduledTask.h"
+
+class NTRIPHttpSession;
+class RuntimeScheduler;
 
 class NTRIPHttpTransport : public NTRIPTransport
 {
@@ -18,65 +19,42 @@ class NTRIPHttpTransport : public NTRIPTransport
     friend class NTRIPHttpTransportTest;
 
 public:
-    static constexpr std::chrono::milliseconds kConnectTimeout{10000};
-    static constexpr std::chrono::milliseconds kDataWatchdog{30000};
-    static constexpr int kMaxHttpHeaderSize = 32768;
+    static constexpr std::chrono::milliseconds CONNECT_TIMEOUT{10000};
+    static constexpr std::chrono::milliseconds DATA_WATCHDOG{30000};
 
-    explicit NTRIPHttpTransport(const NTRIPTransportConfig& config, QObject* parent = nullptr);
+    NTRIPHttpTransport(const NTRIPConnectionConfig& config, const QVector<int>& rtcmWhitelist,
+                       QObject* parent = nullptr, RuntimeScheduler* scheduler = nullptr);
     ~NTRIPHttpTransport() override;
 
     void start() override;
     void stop() override;
     void sendNMEA(const QByteArray& nmea) override;
 
-    void setRtcmWhitelist(const QVector<int>& messageIds) override { _rtcmParser.setWhitelist(messageIds); }
-
-    const NTRIPTransportConfig& config() const { return _config; }
-
-    // plaintextCredentialsWarning lives on the NTRIPTransport base signal set so
-    // NTRIPManager can connect without concrete-type knowledge.
-
-protected:
-    struct HttpStatus
-    {
-        int code = 0;
-        QString reason;
-        bool valid = false;
-    };
-
-    static HttpStatus parseHttpStatusLine(const QString& line);
-
-    static bool isHttpSuccess(int code) { return code >= 200 && code < 300; }
-
-    struct HttpRequest
-    {
-        QByteArray bytes;
-        /// Credentials are present and the channel is not TLS — caller must warn.
-        bool credentialsInClear = false;
-    };
-
-    static HttpRequest buildHttpRequest(const NTRIPTransportConfig& config);
+    void setRtcmWhitelist(const QVector<int>& messageIds) override { _rtcmDecoder.setWhitelist(messageIds); }
 
 private:
-    void _connect();
-    void _failFatal(NTRIPError code, const QString& msg, QAbstractSocket* socket);
-    void _sendHttpRequest();
-    void _readBytes();
-    void _handleHttpResponse();
-    void _handleRtcmData();
-    void _parseRtcm(const QByteArray& buffer);
+    /// Makes @a session the live attempt and follows its response; also the test seam for socketless sessions.
+    NTRIPHttpSession* _attachSession(NTRIPHttpSession* session);
+    qint64 _nowMs() const;
+    void _startConnectTimeout();
+    void _startDataWatchdog(std::chrono::milliseconds delay);
+    void _fail(const NTRIPFailure& failure);
+    void _retireSession();
+    /// Not stopped, and @a session is still the live one: an observer did not stop or restart this transport.
+    bool _isCurrent(const NTRIPHttpSession* session) const;
+    void _stopTimers();
+    void _onResponseStarted();
+    void _parseRtcm(const QByteArray& buffer, qint64 receivedAtMs);
 
-    NTRIPTransportConfig _config;
+    NTRIPConnectionConfig _config;
 
-    QTcpSocket* _socket = nullptr;
-    QChronoTimer _connectTimeoutTimer;
-    QChronoTimer _dataWatchdogTimer;
+    QPointer<NTRIPHttpSession> _session;
+    RuntimeScheduler* const _scheduler;
+    ScheduledTask _connectTimeoutTask;
+    ScheduledTask _dataWatchdogTask;
 
-    RTCMParser _rtcmParser;
-    bool _httpHandshakeDone = false;
+    RTCMFrameDecoder _rtcmDecoder;
+    qint64 _lastValidFrameMs = 0;
+    bool _dataSinceValidFrame = false;
     bool _stopped = false;
-
-    qint64 _postOkTimestampMs = 0;
-
-    QByteArray _httpResponseBuf;
 };

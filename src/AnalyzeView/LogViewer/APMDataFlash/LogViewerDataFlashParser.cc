@@ -296,16 +296,24 @@ LogParseResult parseFile(const QString &filePath, const ProgressCallback &progre
     double modeSegmentStartSecs = -1.0;
     QString currentModeName;
 
+    const auto buildFieldNames = [](const APMDataFlashUtility::MessageFormat& fmt, const QString& prefix) {
+        QHash<QString, QString> perCol;
+        perCol.reserve(fmt.columns.size());
+        for (const QString& col : fmt.columns) {
+            if (fmt.instanceColumn.isEmpty() || (col != fmt.instanceColumn)) {
+                perCol.insert(col, prefix + col);
+            }
+        }
+        return perCol;
+    };
+
     QHash<uint8_t, QHash<QString, QString>> fieldNameByCol;
     fieldNameByCol.reserve(formats.size());
     for (auto fmtIt = formats.cbegin(); fmtIt != formats.cend(); ++fmtIt) {
         const APMDataFlashUtility::MessageFormat &fmt = fmtIt.value();
-        QHash<QString, QString> &perCol = fieldNameByCol[fmtIt.key()];
-        perCol.reserve(fmt.columns.size());
-        for (const QString &col : fmt.columns) {
-            perCol.insert(col, fmt.name + QLatin1Char('.') + col);
-        }
+        fieldNameByCol.insert(fmtIt.key(), buildFieldNames(fmt, fmt.name + QLatin1Char('.')));
     }
+    QHash<uint8_t, QHash<int, QHash<QString, QString>>> instanceFieldNameByCol;
 
     static const QString kPARM = QStringLiteral("PARM");
     static const QString kMSG  = QStringLiteral("MSG");
@@ -315,24 +323,28 @@ LogParseResult parseFile(const QString &filePath, const ProgressCallback &progre
     static const QString kGPS  = QStringLiteral("GPS");
     static const QString kGPS2 = QStringLiteral("GPS2");
 
-    APMDataFlashUtility::iterateMessages(bytes.constData(), bytes.size(), formats,
-        [&](uint8_t msgType, const char *payload, int, const APMDataFlashUtility::MessageFormat &fmt) {
-        const QMap<QString, QVariant> values = APMDataFlashUtility::parseMessage(payload, fmt);
+    const auto parseRecord = [&](uint8_t msgType, const char* payload, int payloadSize,
+                                 const APMDataFlashUtility::MessageFormat& fmt) {
+        const QMap<QString, QVariant> values = APMDataFlashUtility::parseMessage(payload, payloadSize, fmt);
+        if (values.isEmpty()) {
+            return !cancelToken || !cancelToken->load(std::memory_order_relaxed);
+        }
         const double timestampSecs = _extractTimestampSeconds(values);
         if (timestampSecs >= 0.0) {
-            if (minTimestampSecs < 0.0 || timestampSecs < minTimestampSecs) { minTimestampSecs = timestampSecs; }
+            if (minTimestampSecs < 0.0 || timestampSecs < minTimestampSecs) {
+                minTimestampSecs = timestampSecs;
+            }
             maxTimestampSecs = std::max(maxTimestampSecs, timestampSecs);
         }
 
-        if ((fmt.name == kGPS || fmt.name == kGPS2) && result.startTime.isNull()
-                && values.contains(QStringLiteral("GWk")) && values.contains(QStringLiteral("GMS"))
-                && timestampSecs >= 0.0) {
+        if ((fmt.name == kGPS || fmt.name == kGPS2) && result.startTime.isNull() &&
+            values.contains(QStringLiteral("GWk")) && values.contains(QStringLiteral("GMS")) && timestampSecs >= 0.0) {
             const int gwk = values.value(QStringLiteral("GWk")).toInt();
             const int gms = values.value(QStringLiteral("GMS")).toInt();
             if (gwk > 2000) {
                 const double gpsSecs = 315964800.0 + (7.0 * 24 * 60 * 60) * gwk + (gms / 1000.0);
-                const QDateTime gpsDateTime = QDateTime::fromMSecsSinceEpoch(
-                    static_cast<qint64>(gpsSecs * 1000.0), QTimeZone::utc());
+                const QDateTime gpsDateTime =
+                    QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(gpsSecs * 1000.0), QTimeZone::utc());
                 const int leapSecs = _leapSecondsGPS(gpsDateTime.date().year(), gpsDateTime.date().month());
                 const double utcSecs = gpsSecs - leapSecs;
                 result.startTime = QDateTime::fromMSecsSinceEpoch(
@@ -342,19 +354,18 @@ LogParseResult parseFile(const QString &filePath, const ProgressCallback &progre
 
         if (fmt.name == kPARM) {
             const QString paramName = values.value(QStringLiteral("Name")).toString();
-            const QVariant paramValue = values.contains(QStringLiteral("Value"))
-                ? values.value(QStringLiteral("Value"))
-                : values.value(QStringLiteral("Val"));
+            const QVariant paramValue = values.contains(QStringLiteral("Value")) ? values.value(QStringLiteral("Value"))
+                                                                                 : values.value(QStringLiteral("Val"));
             if (!paramName.isEmpty()) {
                 QVariantMap row;
-                row[QStringLiteral("name")]         = paramName;
-                row[QStringLiteral("value")]        = paramValue;
+                row[QStringLiteral("name")] = paramName;
+                row[QStringLiteral("value")] = paramValue;
                 // DataFlash logs don't carry default value metadata
-                row[QStringLiteral("isFloat")]      = paramValue.metaType() == QMetaType::fromType<float>()
-                                                      || paramValue.metaType() == QMetaType::fromType<double>();
-                row[QStringLiteral("hasDefault")]   = false;
+                row[QStringLiteral("isFloat")] = paramValue.metaType() == QMetaType::fromType<float>() ||
+                                                 paramValue.metaType() == QMetaType::fromType<double>();
+                row[QStringLiteral("hasDefault")] = false;
                 row[QStringLiteral("defaultValue")] = QVariant();
-                row[QStringLiteral("isDefault")]    = false;
+                row[QStringLiteral("isDefault")] = false;
                 result.parameters.append(row);
             }
         } else if (fmt.name == kMSG) {
@@ -400,35 +411,68 @@ LogParseResult parseFile(const QString &filePath, const ProgressCallback &progre
                          _ardupilotErrDescription(subsystem, ecode));
         } else if (fmt.name == kEV) {
             const int eventId = values.value(QStringLiteral("Id"), values.value(QStringLiteral("Event"))).toInt();
-            _appendEvent(result.events, timestampSecs, QStringLiteral("event"),
-                         _ardupilotEventDescription(eventId));
+            _appendEvent(result.events, timestampSecs, QStringLiteral("event"), _ardupilotEventDescription(eventId));
         }
 
         result.sampleCount++;
 
-        const QHash<QString, QString> &perCol = fieldNameByCol[msgType];
+        const QHash<QString, QString>* perCol = &fieldNameByCol[msgType];
+        if (!fmt.instanceColumn.isEmpty()) {
+            const int instance = values.value(fmt.instanceColumn).toInt();
+            QHash<int, QHash<QString, QString>>& byInstance = instanceFieldNameByCol[msgType];
+            auto instIt = byInstance.find(instance);
+            if (instIt == byInstance.end()) {
+                const QString prefix = QStringLiteral("%1[%2].").arg(fmt.name).arg(instance);
+                instIt = byInstance.insert(instance, buildFieldNames(fmt, prefix));
+            }
+            perCol = &instIt.value();
+        }
         const bool haveTimestamp = (timestampSecs >= 0.0);
         for (auto it = values.cbegin(); it != values.cend(); ++it) {
-            const auto nameIt = perCol.constFind(it.key());
-            if (nameIt == perCol.constEnd()) { continue; }
-            const QString &fieldName = nameIt.value();
+            const auto nameIt = perCol->constFind(it.key());
+            if (nameIt == perCol->constEnd()) {
+                continue;
+            }
+            const QString& fieldName = nameIt.value();
             fieldSet.insert(fieldName);
-            if (!haveTimestamp) { continue; }
+            if (!haveTimestamp) {
+                continue;
+            }
             const int typeId = it.value().metaType().id();
-            const bool numeric =
-                (typeId == QMetaType::Int) || (typeId == QMetaType::UInt) ||
-                (typeId == QMetaType::LongLong) || (typeId == QMetaType::ULongLong) ||
-                (typeId == QMetaType::Float) || (typeId == QMetaType::Double);
+            const bool numeric = (typeId == QMetaType::Int) || (typeId == QMetaType::UInt) ||
+                                 (typeId == QMetaType::LongLong) || (typeId == QMetaType::ULongLong) ||
+                                 (typeId == QMetaType::Float) || (typeId == QMetaType::Double);
             if (numeric) {
                 result.fieldSamples[fieldName].append(QPointF(timestampSecs, it.value().toDouble()));
                 plottableFieldSet.insert(fieldName);
             }
         }
         return !cancelToken || !cancelToken->load(std::memory_order_relaxed);
-    }, progressCallback);
+    };
+    APMDataFlashUtility::iterateMessages(bytes.constData(), bytes.size(), formats, parseRecord, progressCallback);
 
     if (cancelToken && cancelToken->load(std::memory_order_relaxed)) {
         return result; // cancelled; ok remains false
+    }
+
+    // Drop the instance index from message types that only logged a single instance
+    for (auto typeIt = instanceFieldNameByCol.cbegin(); typeIt != instanceFieldNameByCol.cend(); ++typeIt) {
+        if (typeIt.value().size() != 1) {
+            continue;
+        }
+        const QHash<QString, QString> plainNames = fieldNameByCol.value(typeIt.key());
+        const QHash<QString, QString> indexedNames = typeIt.value().cbegin().value();
+        for (auto colIt = indexedNames.cbegin(); colIt != indexedNames.cend(); ++colIt) {
+            const QString& indexedName = colIt.value();
+            const QString plainName = plainNames.value(colIt.key());
+            if (fieldSet.remove(indexedName)) {
+                fieldSet.insert(plainName);
+            }
+            if (plottableFieldSet.remove(indexedName)) {
+                plottableFieldSet.insert(plainName);
+                result.fieldSamples.insert(plainName, result.fieldSamples.take(indexedName));
+            }
+        }
     }
 
     if (hasOpenModeSegment && (maxTimestampSecs >= modeSegmentStartSecs)) {

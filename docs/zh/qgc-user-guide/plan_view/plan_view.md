@@ -4,7 +4,7 @@
 If missions fail to upload or download, see [Plan Upload/Download Failures](../troubleshooting/plan_upload_download.md). For mission resume issues, see [Resume Mission Failures](../troubleshooting/resume_mission.md).
 :::
 
-_计划视图_ 用于为你的载具规 划自动化任务_ 并上传到载具。 一旦任务已 [规划](#plan_mission) 并被送往载具，您将切换到[飞行视图](../fly_view/fly_view.md) 来执行任务。
+_计划视图_ 用于为你的载具规 划自动化任务_ 并上传到载具。一旦任务已 [规划](#plan_mission) 并被送往载具，您将切换到[飞行视图](../fly_view/fly_view.md) 来执行任务。
 
 It is also used to configure the [GeoFence](plan_geofence.md) and [Rally Points](plan_rally_points.md) if these are supported by the firmware.
 
@@ -54,6 +54,9 @@ The plan tools are a vertical tool strip on the left side of the map, used for a
 
 Inserts a takeoff command into the mission. This tool is available for all vehicle types except rovers.
 
+For PX4 VTOL vehicles, choose **VTOL takeoff** to climb and transition to fixed-wing flight, or
+**Multicopter takeoff** to remain in multicopter mode. The VTOL takeoff remains the default choice.
+
 ### Pattern
 
 The [Pattern](pattern.md) tool simplifies the creation of missions for flying complex geometries, including [surveys](../plan_view/pattern_survey.md) and [structure scans](../plan_view/pattern_structure_scan_v2.md).
@@ -90,6 +93,7 @@ File operations are located in the **Plan Toolbar** at the top of the view:
 - **Upload** — Upload the plan to the vehicle. Highlighted when the plan has un-uploaded changes.
 - **Clear** — Remove all mission items, geofence, and rally points. If connected to a vehicle, also clears them from the vehicle.
 - **Hamburger menu** (☰) — Additional options:
+  - _Save as..._ — Save the plan to a new file.
   - _Save as KML_ — Export the plan as a KML file.
   - _Download_ — Download the current plan from the vehicle (only available when connected).
 
@@ -115,7 +119,7 @@ Selecting a layer also expands the corresponding section in the [Plan Editor Pan
 
 The Plan Info section contains general plan-level settings:
 
-- **Plan File** — An editable name for the plan file.
+- **Plan File** — The name of the currently loaded plan file (`<Untitled>` if the plan has not been saved yet).
 - **Vehicle Info** — Firmware and vehicle type selectors. When connected to a vehicle these are determined automatically; when planning offline you must set them before adding any mission items so that the correct mission commands are available.
 - **Expected Home Position** — The altitude (AMSL) for the planned home position is determined automatically from terrain data. A **Move To Map Center** button repositions the home marker to the center of the map. This is only the _planned_ home position for estimating mission times and drawing waypoint lines — the actual home position is set by the vehicle when it arms.
 

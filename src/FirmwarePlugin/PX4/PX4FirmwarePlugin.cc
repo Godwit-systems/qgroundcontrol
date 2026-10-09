@@ -1,16 +1,17 @@
 #include "PX4FirmwarePlugin.h"
-#include "ParameterMetaData.h"
-#include "PX4ParameterMetaData.h"
-#include "AppMessages.h"
-#include "PX4AutoPilotPlugin.h"
-#include "QGCLoggingCategory.h"
-#include "SettingsManager.h"
-#include "PlanViewSettings.h"
-#include "ParameterManager.h"
-#include "Vehicle.h"
 
 #include <QtCore/QString>
 
+#include "AppMessages.h"
+#include "MAVLinkLib.h"
+#include "PX4AutoPilotPlugin.h"
+#include "PX4ParameterMetaData.h"
+#include "ParameterManager.h"
+#include "ParameterMetaData.h"
+#include "PlanViewSettings.h"
+#include "QGCLoggingCategory.h"
+#include "SettingsManager.h"
+#include "Vehicle.h"
 #include "px4_custom_mode.h"
 
 QGC_LOGGING_CATEGORY(PX4FirmwarePluginLog, "FirmwarePlugin.PX4FirmwarePlugin")
@@ -245,6 +246,9 @@ bool PX4FirmwarePlugin::isCapable(const Vehicle *vehicle, FirmwareCapabilities c
     if (vehicle->multiRotor() || vehicle->vtol()) {
         available |= TakeoffVehicleCapability | GuidedTakeoffCapability | OrbitModeCapability;
     }
+    if (vehicle->vtol()) {
+        available |= VTOLMulticopterTakeoffCapability;
+    }
     if (vehicle->fixedWing()) {
         available |= TakeoffVehicleCapability | OrbitModeCapability;
     }
@@ -413,7 +417,11 @@ double PX4FirmwarePlugin::maximumHorizontalSpeedMultirotorMetersSecond(Vehicle* 
     QString speedParam("MPC_XY_VEL_MAX");
 
     if (vehicle->parameterManager()->parameterExists(ParameterManager::defaultComponentId, speedParam)) {
-        return vehicle->parameterManager()->getParameter(ParameterManager::defaultComponentId, speedParam)->rawValue().toDouble();
+        const Fact* speedFact =
+            vehicle->parameterManager()->getParameter(ParameterManager::defaultComponentId, speedParam);
+        if (speedFact) {
+            return speedFact->rawValue().toDouble();
+        }
     }
 
     return FirmwarePlugin::maximumHorizontalSpeedMultirotorMetersSecond(vehicle);
@@ -424,7 +432,11 @@ double PX4FirmwarePlugin::maximumEquivalentAirspeed(Vehicle* vehicle) const
     QString airspeedMax("FW_AIRSPD_MAX");
 
     if (vehicle->parameterManager()->parameterExists(ParameterManager::defaultComponentId, airspeedMax)) {
-        return vehicle->parameterManager()->getParameter(ParameterManager::defaultComponentId, airspeedMax)->rawValue().toDouble();
+        const Fact* airspeedFact =
+            vehicle->parameterManager()->getParameter(ParameterManager::defaultComponentId, airspeedMax);
+        if (airspeedFact) {
+            return airspeedFact->rawValue().toDouble();
+        }
     }
 
     return FirmwarePlugin::maximumEquivalentAirspeed(vehicle);
@@ -435,7 +447,11 @@ double PX4FirmwarePlugin::minimumEquivalentAirspeed(Vehicle* vehicle) const
     QString airspeedMin("FW_AIRSPD_MIN");
 
     if (vehicle->parameterManager()->parameterExists(ParameterManager::defaultComponentId, airspeedMin)) {
-        return vehicle->parameterManager()->getParameter(ParameterManager::defaultComponentId, airspeedMin)->rawValue().toDouble();
+        const Fact* airspeedFact =
+            vehicle->parameterManager()->getParameter(ParameterManager::defaultComponentId, airspeedMin);
+        if (airspeedFact) {
+            return airspeedFact->rawValue().toDouble();
+        }
     }
 
     return FirmwarePlugin::minimumEquivalentAirspeed(vehicle);
@@ -832,13 +848,15 @@ bool PX4FirmwarePlugin::hasGripper(const Vehicle* vehicle) const
     // PX4 versions prior to v1.17 use the PD_GRIPPER_EN boolean
     const QString gripperEnableParam = QStringLiteral("PD_GRIPPER_EN");
     if (paramMgr->parameterExists(ParameterManager::defaultComponentId, gripperEnableParam)) {
-        return paramMgr->getParameter(ParameterManager::defaultComponentId, gripperEnableParam)->rawValue().toInt() != 0;
+        const Fact* gripperFact = paramMgr->getParameter(ParameterManager::defaultComponentId, gripperEnableParam);
+        return gripperFact && gripperFact->rawValue().toInt() != 0;
     }
 
     // PX4 v1.17+ removed PD_GRIPPER_EN; PD_GRIPPER_TYPE >= 0 means enabled (-1 = Undefined)
     const QString gripperTypeParam = QStringLiteral("PD_GRIPPER_TYPE");
     if (paramMgr->parameterExists(ParameterManager::defaultComponentId, gripperTypeParam)) {
-        return paramMgr->getParameter(ParameterManager::defaultComponentId, gripperTypeParam)->rawValue().toInt() >= 0;
+        const Fact* gripperFact = paramMgr->getParameter(ParameterManager::defaultComponentId, gripperTypeParam);
+        return gripperFact && gripperFact->rawValue().toInt() >= 0;
     }
 
     return false;
@@ -918,8 +936,6 @@ QVariant PX4FirmwarePlugin::expandedToolbarIndicatorSource(const Vehicle* /*vehi
         return QVariant::fromValue(QUrl::fromUserInput("qrc:/qml/QGroundControl/FirmwarePlugin/PX4/PX4BatteryIndicator.qml"));
     } else if (indicatorName == "FlightMode") {
         return QVariant::fromValue(QUrl::fromUserInput("qrc:/qml/QGroundControl/FirmwarePlugin/PX4/PX4FlightModeIndicator.qml"));
-    } else if (indicatorName == "MainStatus") {
-        return QVariant::fromValue(QUrl::fromUserInput("qrc:/qml/QGroundControl/FirmwarePlugin/PX4/PX4MainStatusIndicator.qml"));
     }
 
     return QVariant();

@@ -1,41 +1,45 @@
 #include "SettingsManager.h"
-#include "AppMessages.h"
-#include "QGCLoggingCategory.h"
+
+#include <QtCore/QApplicationStatic>
+#include <QtCore/QRegularExpression>
+
 #include "ADSBVehicleManagerSettings.h"
 #include "APMMavlinkStreamRateSettings.h"
+#include "AppMessages.h"
 #include "AppSettings.h"
 #include "AutoConnectSettings.h"
 #include "BatteryIndicatorSettings.h"
-#include "MavlinkActionsSettings.h"
 #include "FirmwareUpgradeSettings.h"
 #include "FlightMapSettings.h"
 #include "FlightModeSettings.h"
 #include "FlyViewSettings.h"
+#include "GPSCorrectionSettings.h"
 #include "GimbalControllerSettings.h"
-#include "MapsSettings.h"
-#include "OfflineMapsSettings.h"
-#include "PlanViewSettings.h"
-#include "RemoteIDSettings.h"
-#include "RTKSettings.h"
-#include "UnitsSettings.h"
-#include "NTRIPSettings.h"
-#include "VideoSettings.h"
-#include "MavlinkSettings.h"
 #include "JoystickManagerSettings.h"
+#include "JsonParsing.h"
 #include "LogManagerSettings.h"
 #include "LogViewerSettings.h"
-#include "Viewer3DSettings.h"
-#include "JsonParsing.h"
+#include "MapsSettings.h"
+#include "MavlinkActionsSettings.h"
+#include "MavlinkSettings.h"
+#include "NTRIPSettings.h"
+#include "OfflineMapsSettings.h"
+#include "PlanViewSettings.h"
 #include "QGCCorePlugin.h"
-
-#include <QtCore/QApplicationStatic>
+#include "QGCLoggingCategory.h"
+#include "RTKSettings.h"
+#include "RemoteIDSettings.h"
+#include "SettingsGroup.h"
+#include "UnitsSettings.h"
+#include "VideoSettings.h"
+#include "Viewer3DSettings.h"
 
 QGC_LOGGING_CATEGORY(SettingsManagerLog, "Utilities.SettingsManager")
 
 Q_APPLICATION_STATIC(SettingsManager, _settingsManagerInstance);
 
 SettingsManager::SettingsManager(QObject *parent)
-    : QObject(parent)
+    : QQmlPropertyMap(this, parent)
 {
     qCDebug(SettingsManagerLog) << this;
 }
@@ -70,6 +74,7 @@ void SettingsManager::init()
     _planViewSettings = new PlanViewSettings(this);
     _remoteIDSettings = new RemoteIDSettings(this);
     _rtkSettings = new RTKSettings(this);
+    _gpsCorrectionSettings = new GPSCorrectionSettings(this);
     _ntripSettings = new NTRIPSettings(this);
     _videoSettings = new VideoSettings(this);
     _mavlinkSettings = new MavlinkSettings(this);
@@ -79,6 +84,36 @@ void SettingsManager::init()
     _viewer3DSettings = new Viewer3DSettings(this);
     _adsbVehicleManagerSettings = new ADSBVehicleManagerSettings(this);
     _apmMavlinkStreamRateSettings = new APMMavlinkStreamRateSettings(this);
+
+    QGCCorePlugin::instance()->registerCustomSettings(this);
+}
+
+void SettingsManager::registerCustomSettingsGroup(const QString &accessorName, SettingsGroup *group)
+{
+    // Must be a valid QML identifier or generated pages can't resolve the group via dot notation
+    static const QRegularExpression validAccessorRe(QStringLiteral("^[a-z_][A-Za-z0-9_]*$"));
+    if (!validAccessorRe.match(accessorName).hasMatch() || !group) {
+        qCWarning(SettingsManagerLog) << "registerCustomSettingsGroup: invalid accessor name or null group" << accessorName;
+        delete group;
+        return;
+    }
+    if (contains(accessorName)) {
+        qCWarning(SettingsManagerLog) << "registerCustomSettingsGroup: accessor already registered" << accessorName;
+        // Re-registering the stored group itself must not destroy it
+        if (group != value(accessorName).value<QObject*>()) {
+            delete group;
+        }
+        return;
+    }
+    if (staticMetaObject.indexOfProperty(accessorName.toUtf8().constData()) != -1) {
+        qCWarning(SettingsManagerLog) << "registerCustomSettingsGroup: accessor collides with a built-in settings group" << accessorName;
+        delete group;
+        return;
+    }
+
+    group->setParent(this);
+    insert(accessorName, QVariant::fromValue<QObject*>(group));
+    qCDebug(SettingsManagerLog) << "Registered custom settings group" << accessorName;
 }
 
 ADSBVehicleManagerSettings *SettingsManager::adsbVehicleManagerSettings() const { return _adsbVehicleManagerSettings; }
@@ -99,6 +134,12 @@ RemoteIDSettings *SettingsManager::remoteIDSettings() const { return _remoteIDSe
 RTKSettings *SettingsManager::rtkSettings() const { return _rtkSettings; }
 UnitsSettings *SettingsManager::unitsSettings() const { return _unitsSettings; }
 NTRIPSettings *SettingsManager::ntripSettings() const { return _ntripSettings; }
+
+GPSCorrectionSettings* SettingsManager::gpsCorrectionSettings() const
+{
+    return _gpsCorrectionSettings;
+}
+
 VideoSettings *SettingsManager::videoSettings() const { return _videoSettings; }
 MavlinkSettings *SettingsManager::mavlinkSettings() const { return _mavlinkSettings; }
 JoystickManagerSettings *SettingsManager::joystickManagerSettings() const { return _joystickManagerSettings; }

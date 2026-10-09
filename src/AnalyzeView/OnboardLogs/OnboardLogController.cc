@@ -417,13 +417,23 @@ bool OnboardLogController::_logComplete() const
 void OnboardLogController::_receivedAllData()
 {
     _timer->stop();
-    if (_prepareLogDownload()) {
+    while (_prepareLogDownload()) {
+        if (_downloadData->chunk_table.isEmpty()) {
+            // Nothing to request (0 byte log): _logComplete() can never become true and the
+            // vehicle never answers a zero-length request, so the download would stall
+            // forever (issue #15068). The empty file already exists.
+            _downloadData->entry->setStatus(tr("Downloaded"));
+            _downloadData.reset();
+            continue;
+        }
+
         _requestLogData(_downloadData->ID, 0, _downloadData->chunk_table.size() * MAVLINK_MSG_LOG_DATA_FIELD_DATA_LEN);
         _timer->start(kTimeOutMs);
-    } else {
-        _resetSelection();
-        _setDownloading(false);
+        return;
     }
+
+    _resetSelection();
+    _setDownloading(false);
 }
 
 bool OnboardLogController::_prepareLogDownload()
@@ -556,12 +566,13 @@ void OnboardLogController::cancel()
             }
 
             if (_downloadingLogs) {
-                _vehicle->ftpManager()->cancelDownload();
+                // cancelDownload completes synchronously; detach the entry first so it is not stamped as an error
                 if (_ftpCurrentDownloadEntry) {
                     _ftpCurrentDownloadEntry->setStatus(tr("Canceled"));
                     _ftpCurrentDownloadEntry = nullptr;
                 }
                 _ftpDownloadQueue.clear();
+                _vehicle->ftpManager()->cancelDownload();
             }
         }
     } else {
@@ -1000,10 +1011,24 @@ void OnboardLogController::_ftpListDirComplete(const QStringList &dirList, const
         // and/or date subdirectories to descend into (PX4 fallback /fs/microsd/log).
         const uint flatLogs = _ftpProcessFileEntries(dirList, QString());
 
+        // A kCmdListDirectoryWithTime listing may give a directory the same trailing
+        // fields as a file: "D<name>\t<size>\t<modification time>". Servers differ on
+        // whether they send them (MAVSDK does, PX4 does not), so tolerate either. A
+        // plain kCmdListDirectory entry is just "D<name>", where a tab would be part
+        // of the name, so only strip the fields when times were asked for.
+        const bool withTime = _vehicle && !_vehicle->ftpManager()->listDirectoryWithTimeUnsupported();
+
         for (const QString &entry : dirList) {
             if (entry.startsWith(QLatin1Char('D'))) {
-                const QString dirName = entry.mid(1);
-                if (!dirName.isEmpty()) {
+                QString dirName = entry.mid(1);
+                if (withTime) {
+                    dirName = dirName.section(QLatin1Char('\t'), 0, 0);
+                }
+                // Some servers list "." and ".."; descending into those would
+                // list this directory again, or its parent (ArduPilot sends
+                // them, PX4 does not).
+                if (!dirName.isEmpty() &&
+                    (dirName != QStringLiteral(".")) && (dirName != QStringLiteral(".."))) {
                     _ftpDirsToList.append(dirName);
                 }
             }

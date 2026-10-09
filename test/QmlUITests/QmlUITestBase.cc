@@ -50,6 +50,23 @@ static QQuickItem* findVisibleItemImmediate(QQuickItem* root, const QString& obj
     return nullptr;
 }
 
+QQuickItem* QmlUITestBase::findItem(QQuickItem* root, const QString& objectName)
+{
+    if (!root) {
+        return nullptr;
+    }
+    if (root->objectName() == objectName) {
+        return root;
+    }
+    const auto children = root->childItems();
+    for (auto* child : children) {
+        if (auto* found = findItem(child, objectName)) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
 QQuickItem* QmlUITestBase::findVisibleItem(QQuickItem* root, const QString& objectName, int timeoutMs)
 {
     constexpr int pollIntervalMs = 50;
@@ -97,8 +114,6 @@ void QmlUITestBase::startUI()
     // Ignore benign Qt platform warnings that cannot be avoided in offscreen mode
     ignoreLogMessage("default", QtWarningMsg,
                      QRegularExpression(QStringLiteral("This plugin does not support propagateSizeHints")));
-    ignoreLogMessage("qt.qpa.fonts", QtWarningMsg,
-                     QRegularExpression(QStringLiteral("Populating font family aliases")));
     ignoreLogMessage("default", QtWarningMsg, QRegularExpression(QStringLiteral("QRhiGles2")));
     // Async QML incubation rides QQuickWindow's render-loop controller, which never pumps in
     // offscreen mode, so a component still incubating at engine teardown logs this.

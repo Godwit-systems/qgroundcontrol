@@ -10,14 +10,29 @@ class LinkManagerTest : public CommsTest
     Q_OBJECT
 
 private slots:
+#ifndef QGC_NO_SERIAL_LINK
+    void _testOccupiedSerialAutoConnectRecovers();
+    void _testReservedSerialPortNotOpened();
+    void _testSerialReservationFollowsLink();
+#endif
     void _testReconnectsDroppedAutoConnectLink();
     void _testSuppressedLinkNotReconnected();
     void _testDynamicLinkNotReconnected();
     void _testNonAutoConnectLinkNotReconnected();
     void _testNeverStartedLinkNotConnected();
     void _testLinkActiveStableAcrossReconnect();
+    void _testUdpUnresolvedHostFailsConnect();
+    void _testUdpUnresolvedHostAllowedStaysConnected();
+    void _testUdpBindFailureDisconnects();
+    void _testUdpAutoConnectBindFailureReusesConfig();
+    void _testForwardingLinkUnresolvedHostRetries();
+    void _testSupportForwardingFailureAllowsRetry();
+    void _testDynamicUdpLinkIgnoresSameNamedUserLink();
 
 private:
     SharedLinkConfigurationPtr _addMockConfig(const QString &name, bool dynamic, bool autoConnect);
     void _reconnect();
+    void _expectUdpBindFailureLogs();
+    void _verifyUdpBindFailureLogs();
+    QList<SharedLinkConfigurationPtr> _configsNamed(const char* name);
 };
