@@ -1,4 +1,5 @@
 #include "CustomAutoPilotPlugin.h"
+#include "AirframeComponent.h"
 #include "ParameterManager.h"
 #include "QGCCorePlugin.h"
 #include "Vehicle.h"
@@ -46,6 +47,11 @@ const QVariantList &CustomAutoPilotPlugin::vehicleComponents()
         }
 
         if (name == QStringLiteral("Actuators")) {
+            _components.append(componentVariant);
+            continue;
+        }
+
+        if (qobject_cast<AirframeComponent *>(component)) {
             _components.append(componentVariant);
             continue;
         }

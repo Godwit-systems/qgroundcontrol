@@ -346,9 +346,11 @@ Item {
                         id: acceptanceTimer
                         interval: 1000
                         repeat: false
+                       
 
                         onTriggered: {
                             root.acceptedThrow = true
+                            
                             
                             console.log("A held for 1 second")
 
@@ -361,6 +363,7 @@ Item {
                         if (event.key === Qt.Key_A && !event.isAutoRepeat) {
                             acceptanceTimer.start()
                             event.accepted = true
+                            running: true
                         }
                     }
 
@@ -369,6 +372,7 @@ Item {
                             acceptanceTimer.stop()
                             root.acceptedThrow = false
                             event.accepted = true
+                             running: false
                         }
                     }
 

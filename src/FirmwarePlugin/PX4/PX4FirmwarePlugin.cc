@@ -15,6 +15,77 @@
 
 QGC_LOGGING_CATEGORY(PX4FirmwarePluginLog, "FirmwarePlugin.PX4FirmwarePlugin")
 
+namespace {
+
+constexpr int kPx4StandardVtolType = 2;
+// DO_REPOSITION has no vertical-speed field. PX4 climbs at MPC_Z_V_AUTO_UP, capped by
+// MPC_Z_VEL_MAX_UP. Both default to 3 m/s, so a 700 m Change Altitude takes several minutes.
+constexpr double kStandardVtolGuidedClimbMetersPerSecond = 6.0;
+
+void raiseClimbParamIfLower(Vehicle* vehicle, const QString& paramName, double climbMetersPerSecond)
+{
+    ParameterManager* paramMgr = vehicle->parameterManager();
+    if (!paramMgr->parameterExists(ParameterManager::defaultComponentId, paramName)) {
+        return;
+    }
+
+    Fact* param = paramMgr->getParameter(ParameterManager::defaultComponentId, paramName);
+    if (!param) {
+        return;
+    }
+
+    double target = climbMetersPerSecond;
+    if (!param->maxIsDefaultForType()) {
+        target = qMin(target, param->rawMax().toDouble());
+    }
+
+    const double current = param->rawValue().toDouble();
+    if (current + 0.05 >= target) {
+        return;
+    }
+
+    qCDebug(PX4FirmwarePluginLog) << paramName << "from:" << current << "to:" << target;
+    param->setRawValue(target);
+}
+
+void raiseStandardVtolGuidedClimb(Vehicle* vehicle)
+{
+    if (!vehicle || !vehicle->vtol()) {
+        return;
+    }
+
+    ParameterManager* paramMgr = vehicle->parameterManager();
+    if (!paramMgr->parametersReady()) {
+        return;
+    }
+
+    const QString vtTypeParam = QStringLiteral("VT_TYPE");
+    if (!paramMgr->parameterExists(ParameterManager::defaultComponentId, vtTypeParam)) {
+        return;
+    }
+
+    Fact* vtType = paramMgr->getParameter(ParameterManager::defaultComponentId, vtTypeParam);
+    if (!vtType || (vtType->rawValue().toInt() != kPx4StandardVtolType)) {
+        return;
+    }
+
+    raiseClimbParamIfLower(vehicle, QStringLiteral("MPC_Z_VEL_MAX_UP"), kStandardVtolGuidedClimbMetersPerSecond);
+    raiseClimbParamIfLower(vehicle, QStringLiteral("MPC_Z_V_AUTO_UP"), kStandardVtolGuidedClimbMetersPerSecond);
+
+    const QString velAllParam = QStringLiteral("MPC_Z_VEL_ALL");
+    if (!paramMgr->parameterExists(ParameterManager::defaultComponentId, velAllParam)) {
+        return;
+    }
+
+    Fact* velAll = paramMgr->getParameter(ParameterManager::defaultComponentId, velAllParam);
+    // A positive overall limit replaces the individual climb speeds.
+    if (velAll && (velAll->rawValue().toDouble() > 0.0)) {
+        raiseClimbParamIfLower(vehicle, velAllParam, kStandardVtolGuidedClimbMetersPerSecond);
+    }
+}
+
+}  // namespace
+
 PX4FirmwarePluginInstanceData::PX4FirmwarePluginInstanceData(QObject* parent)
     : FirmwarePluginInstanceData(parent)
     , versionNotified(false)
@@ -451,15 +522,14 @@ void PX4FirmwarePlugin::_changeAltAfterPause(void* resultHandlerData, bool pause
     PauseVehicleThenChangeAltData_t* pData = static_cast<PauseVehicleThenChangeAltData_t*>(resultHandlerData);
 
     if (pauseSucceeded) {
-        pData->vehicle->sendMavCommand(
-                    pData->vehicle->defaultComponentId(),
-                    MAV_CMD_DO_REPOSITION,
-                    true,                                   // show error is fails
-                    -1.0f,                                  // Don't change groundspeed
-                    MAV_DO_REPOSITION_FLAGS_CHANGE_MODE,
-                    0.0f,                                   // Reserved
-                    qQNaN(), qQNaN(), qQNaN(),              // No change to yaw, lat, lon
-                    static_cast<float>(pData->newAMSLAlt));
+        raiseStandardVtolGuidedClimb(pData->vehicle);
+        pData->vehicle->sendMavCommand(pData->vehicle->defaultComponentId(), MAV_CMD_DO_REPOSITION,
+                                       true,                       // show error is fails
+                                       -1.0f,                      // Don't change groundspeed
+                                       MAV_DO_REPOSITION_FLAGS_CHANGE_MODE,
+                                       0.0f,                       // Reserved
+                                       qQNaN(), qQNaN(), qQNaN(),  // No change to yaw, lat, lon
+                                       static_cast<float>(pData->newAMSLAlt));
     } else {
         QGC::showAppMessage(tr("Unable to pause vehicle."));
     }

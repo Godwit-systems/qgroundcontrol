@@ -27,9 +27,9 @@ Item {
     property int    _borderWidthInclusion:      2
     property int    _borderWidthExclusion:      0
     property color  _interiorColorExclusion:    "orange"
-    property color  _interiorColorInclusion:    "transparent"
+    property color  _interiorColorInclusion:    "black"
     property real   _interiorOpacityExclusion:  0.2 * opacity
-    property real   _interiorOpacityInclusion:  1 * opacity
+    property real   _interiorOpacityInclusion:  0.35 * opacity
 
     function addPolygon(inclusionPolygon) {
         // Initial polygon is inset to take 2/3rds space
